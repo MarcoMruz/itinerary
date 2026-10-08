@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="sk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#064e3b">
+  <title>Rodinné itineráre</title>
+  <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
+  <style>[x-cloak]{display:none!important}</style>
+</head>
+<body class="min-h-screen bg-stone-50 text-stone-800 antialiased">
+<script id="boot" type="application/json">{{.}}</script>
+
+<div x-data="itineraryApp()" x-cloak class="flex min-h-screen flex-col">
+
+  <!-- Header -->
+  <header class="bg-gradient-to-br from-emerald-900 via-emerald-800 to-emerald-600 text-white shadow-lg">
+    <div class="mx-auto max-w-6xl px-4 pb-8 pt-5 sm:px-6">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-emerald-100">
+          <svg class="h-5 w-5 text-amber-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 20l6-16 4 10 3-5 5 11H3z"/></svg>
+          Rodinné itineráre
+        </div>
+        <label class="relative w-full sm:w-80" x-show="list.length">
+          <span class="sr-only">Vybrať itinerár</span>
+          <select x-model="selectedId" @change="select(selectedId)"
+                  class="w-full appearance-none rounded-xl border border-white/20 bg-white/10 py-2.5 pl-4 pr-10 text-sm font-medium text-white backdrop-blur focus:outline-none focus:ring-2 focus:ring-amber-300">
+            <template x-for="i in list" :key="i.id">
+              <option class="text-stone-800" :value="i.id" x-text="i.title" :selected="i.id === selectedId"></option>
+            </template>
+          </select>
+          <svg class="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-emerald-100" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M5.3 7.3a1 1 0 011.4 0L10 10.6l3.3-3.3a1 1 0 111.4 1.4l-4 4a1 1 0 01-1.4 0l-4-4a1 1 0 010-1.4z"/></svg>
+        </label>
+      </div>
+
+      <template x-if="current">
+        <div class="mt-6 transition-opacity duration-200" :class="loading && 'opacity-50'">
+          <h1 class="text-2xl font-bold leading-tight sm:text-4xl" x-text="current.title"></h1>
+          <p class="mt-2 text-emerald-100 sm:text-lg" x-show="current.subtitle" x-text="current.subtitle"></p>
+          <div class="mt-4 flex flex-wrap items-center gap-2 text-sm">
+            <span x-show="current.duration" class="rounded-full bg-white/15 px-3 py-1" x-text="'🗓 ' + current.duration"></span>
+            <span x-show="current.targetAudience" class="rounded-full bg-white/15 px-3 py-1" x-text="'👨‍👩‍👧 ' + current.targetAudience"></span>
+            <a x-show="current.mapsUrl" :href="current.mapsUrl" target="_blank" rel="noopener noreferrer"
+               class="inline-flex items-center gap-1.5 rounded-full bg-amber-400 px-4 py-1.5 font-semibold text-emerald-950 shadow hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-white">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 20l-5.4-2.7A1 1 0 013 16.4V5.6a1 1 0 011.4-.9L9 7m0 13l6-3m-6 3V7m6 10l4.6 2.3a1 1 0 001.4-.9V7.6a1 1 0 00-.6-.9L15 4m0 13V4m0 0L9 7"/></svg>
+              Celá trasa v Mapách
+            </a>
+          </div>
+        </div>
+      </template>
+    </div>
+  </header>
+
+  <main class="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6">
+    <div x-show="error" class="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" x-text="error"></div>
+
+    <div x-show="!current && !error" class="rounded-2xl border border-dashed border-stone-300 p-10 text-center text-stone-500">
+      Zatiaľ žiadne itineráre. Pridajte ich cez <code class="text-emerald-700">POST /api/v1/itineraries</code> alebo MCP nástroj <code class="text-emerald-700">add_itinerary</code>.
+    </div>
+
+    <template x-if="current">
+      <div class="grid gap-6 transition-opacity duration-200 lg:grid-cols-3" :class="loading && 'opacity-50'">
+
+        <!-- Days & timeline -->
+        <section class="lg:col-span-2" aria-label="Program">
+          <nav class="-mx-4 flex gap-2 overflow-x-auto px-4 pb-2 sm:mx-0 sm:px-0" role="tablist">
+            <template x-for="(d, i) in current.days" :key="i">
+              <button type="button" role="tab" :aria-selected="i === dayIndex" @click="dayIndex = i"
+                      class="shrink-0 rounded-xl px-4 py-2 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      :class="i === dayIndex ? 'bg-emerald-700 text-white shadow' : 'bg-white text-stone-600 ring-1 ring-stone-200 hover:bg-emerald-50 hover:text-emerald-800'">
+                <span x-text="d.label"></span>
+                <span class="ml-1 text-xs opacity-70" x-text="'(' + d.activities.length + ')'"></span>
+              </button>
+            </template>
+          </nav>
+
+          <ol class="relative mt-4 space-y-4 border-l-2 border-emerald-200 pl-6 sm:pl-8" x-show="day">
+            <template x-for="(a, j) in (day ? day.activities : [])" :key="dayIndex + '-' + j">
+              <li class="relative">
+                <span class="absolute -left-[33px] top-5 h-4 w-4 rounded-full border-4 border-stone-50 bg-emerald-600 sm:-left-[41px]" aria-hidden="true"></span>
+                <article class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-stone-200 transition hover:shadow-md sm:p-5">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-2.5 py-1 font-mono text-xs font-semibold text-emerald-800">
+                      <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path stroke-linecap="round" d="M12 7v5l3 2"/></svg>
+                      <span x-text="a.time"></span>
+                    </span>
+                    <span x-show="a.badge" class="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800 ring-1 ring-amber-200" x-text="a.badge"></span>
+                  </div>
+                  <h3 class="mt-2 text-lg font-semibold text-stone-900" x-text="a.title"></h3>
+                  <div class="mt-2 flex flex-wrap items-center justify-between gap-2">
+                    <p x-show="a.location" class="flex items-center gap-1 text-sm text-stone-500">
+                      <svg class="h-4 w-4 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21s-7-6.1-7-11a7 7 0 1114 0c0 4.9-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
+                      <span x-text="a.location"></span>
+                    </p>
+                    <a x-show="a.mapsUrl" :href="a.mapsUrl" target="_blank" rel="noopener noreferrer"
+                       class="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                      Navigovať ↗
+                    </a>
+                  </div>
+                </article>
+              </li>
+            </template>
+          </ol>
+        </section>
+
+        <!-- Checklist -->
+        <aside class="lg:sticky lg:top-6 lg:self-start" aria-label="Checklist">
+          <div class="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-stone-200">
+            <div class="flex items-center justify-between">
+              <h2 class="text-lg font-bold text-stone-900">Checklist</h2>
+              <span class="text-sm font-semibold text-emerald-700" x-text="progress.done + ' / ' + progress.total"></span>
+            </div>
+            <div class="mt-3 h-2 overflow-hidden rounded-full bg-stone-100">
+              <div class="h-full rounded-full bg-gradient-to-r from-emerald-500 to-amber-400 transition-all duration-300" :style="'width:' + progress.pct + '%'"></div>
+            </div>
+            <ul class="mt-4 space-y-1">
+              <template x-for="item in current.checklist" :key="item">
+                <li>
+                  <label class="flex cursor-pointer items-start gap-3 rounded-lg p-2 hover:bg-stone-50">
+                    <input type="checkbox" class="mt-0.5 h-5 w-5 shrink-0 rounded border-stone-300 accent-emerald-600"
+                           :checked="checked.includes(item)" @change="toggle(item)">
+                    <span class="text-sm" :class="checked.includes(item) && 'text-stone-400 line-through'" x-text="item"></span>
+                  </label>
+                </li>
+              </template>
+            </ul>
+            <p x-show="!current.checklist.length" class="text-sm text-stone-500">Bez položiek.</p>
+            <button type="button" x-show="checked.length" @click="checked = []; save()"
+                    class="mt-3 text-xs font-semibold text-stone-400 hover:text-red-600">Zrušiť všetky označenia</button>
+          </div>
+        </aside>
+      </div>
+    </template>
+  </main>
+
+  <footer class="border-t border-stone-200 py-4 text-center text-xs text-stone-400">
+    Agent ready: <a class="text-emerald-700 hover:underline" href="/api/v1/openapi.json">OpenAPI</a> ·
+    <a class="text-emerald-700 hover:underline" href="/api/v1/itineraries">REST API</a> ·
+    MCP <code>POST /mcp</code>
+  </footer>
+</div>
+
+<script>
+function itineraryApp() {
+  var boot = JSON.parse(document.getElementById('boot').textContent) || {};
+  var cache = new Map();
+  if (boot.active) cache.set(boot.active.id, boot.active);
+
+  return {
+    list: boot.list || [],
+    current: boot.active || null,
+    selectedId: boot.active ? boot.active.id : '',
+    dayIndex: 0,
+    checked: [],
+    loading: false,
+    error: '',
+
+    init: function () {
+      var self = this;
+      this.loadChecked();
+      this.openFromHash();
+      window.addEventListener('hashchange', function () { self.openFromHash(); });
+      // Pick up itineraries added by agents while the tab was in the background.
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'visible') self.refreshList();
+      });
+    },
+
+    get day() { return this.current ? this.current.days[this.dayIndex] : null; },
+
+    get progress() {
+      var items = this.current ? this.current.checklist : [];
+      var self = this;
+      var done = items.filter(function (c) { return self.checked.indexOf(c) !== -1; }).length;
+      return { done: done, total: items.length, pct: items.length ? Math.round(done * 100 / items.length) : 0 };
+    },
+
+    openFromHash: function () {
+      var id = decodeURIComponent(location.hash.slice(1));
+      if (id && id !== this.selectedId) this.select(id);
+    },
+
+    select: async function (id) {
+      if (!id) return;
+      this.selectedId = id;
+      this.error = '';
+      if (decodeURIComponent(location.hash.slice(1)) !== id) history.replaceState(null, '', '#' + encodeURIComponent(id));
+
+      var it = cache.get(id);
+      if (!it) {
+        this.loading = true;
+        try {
+          var res = await fetch('/api/v1/itineraries/' + encodeURIComponent(id), { headers: { Accept: 'application/json' } });
+          if (!res.ok) throw new Error(res.status === 404 ? 'Itinerár neexistuje.' : 'Chyba servera (' + res.status + ').');
+          it = await res.json();
+          cache.set(id, it);
+        } catch (e) {
+          if (this.selectedId === id) { this.error = e.message || 'Nepodarilo sa načítať itinerár.'; this.loading = false; }
+          return;
+        }
+        if (this.selectedId !== id) return; // a newer selection won the race
+        this.loading = false;
+      }
+      this.current = it;
+      this.dayIndex = 0;
+      this.loadChecked();
+    },
+
+    refreshList: async function () {
+      try {
+        var res = await fetch('/api/v1/itineraries', { headers: { Accept: 'application/json' } });
+        if (res.ok) this.list = await res.json();
+      } catch (e) { /* offline: keep current list */ }
+    },
+
+    storageKey: function () { return 'checklist_' + (this.current ? this.current.id : ''); },
+
+    loadChecked: function () {
+      try { this.checked = JSON.parse(localStorage.getItem(this.storageKey())) || []; }
+      catch (e) { this.checked = []; }
+    },
+
+    save: function () {
+      try { localStorage.setItem(this.storageKey(), JSON.stringify(this.checked)); } catch (e) { /* storage unavailable */ }
+    },
+
+    toggle: function (item) {
+      var i = this.checked.indexOf(item);
+      if (i === -1) this.checked.push(item); else this.checked.splice(i, 1);
+      this.save();
+    }
+  };
+}
+</script>
+</body>
+</html>
