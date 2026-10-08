@@ -235,13 +235,44 @@ func TestMCP(t *testing.T) {
 	}
 
 	for body, code := range map[string]float64{
-		`{"jsonrpc":"2.0","id":7,"method":"nope"}`:                                rpcMethodNotFound,
-		`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"nope"}}`: rpcInvalidParams,
+		`{"jsonrpc":"2.0","id":7,"method":"nope"}`:                                                                                                               rpcMethodNotFound,
+		`{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"nope"}}`:                                                                                rpcInvalidParams,
+		`{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"list_itineraries","_meta":{},"typo":true}}`:                                             rpcInvalidParams,
+		`{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"get_itinerary_detail","_meta":{},"arguments":{"id":"slovensky-raj-1yo","typo":true}}}`: rpcInvalidParams,
+		`{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"list_itineraries","_meta":"invalid"}}`:                                                 rpcInvalidParams,
 		`{bad`: rpcParseError,
 	} {
 		if got := rpc(t, mcp, body)["error"].(map[string]any)["code"]; got != code {
 			t.Errorf("%s: want code %v, got %v", body, code, got)
 		}
+	}
+}
+
+func TestMCPRequestMetadata(t *testing.T) {
+	cases := []struct {
+		name   string
+		method string
+		params string
+		want   string
+	}{
+		{"initialize", "initialize", `"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"t","version":"1"}`, "2025-03-26"},
+		{"list", "tools/call", `"name":"list_itineraries","arguments":{}`, "slovensky-raj-1yo"},
+		{"detail", "tools/call", `"name":"get_itinerary_detail","arguments":{"id":"slovensky-raj-1yo"}`, "Hrdlo Hornádu"},
+		{"add", "tools/call", `"name":"add_itinerary","arguments":` + sampleItinerary, "vysoke-tatry-s-detmi"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := newTestServer(t, "")
+			body := `{"jsonrpc":"2.0","id":1,"method":"` + tc.method + `","params":{` + tc.params + `,"_meta":{"progressToken":1,"client/example":{"enabled":true}}}}`
+			res := rpc(t, srv.URL+"/mcp", body)
+			if res["error"] != nil {
+				t.Fatalf("request with metadata failed: %v", res["error"])
+			}
+			result, _ := json.Marshal(res["result"])
+			if !strings.Contains(string(result), tc.want) || strings.Contains(string(result), `"isError":true`) {
+				t.Fatalf("want %q in successful result, got %s", tc.want, result)
+			}
+		})
 	}
 }
 

@@ -400,9 +400,10 @@ func (a *API) dispatch(r *http.Request, req rpcRequest) (any, *rpcError) {
 	switch req.Method {
 	case "initialize":
 		var p struct {
-			ProtocolVersion string `json:"protocolVersion"`
-			Capabilities    any    `json:"capabilities"`
-			ClientInfo      any    `json:"clientInfo"`
+			ProtocolVersion string                     `json:"protocolVersion"`
+			Capabilities    any                        `json:"capabilities"`
+			ClientInfo      any                        `json:"clientInfo"`
+			Meta            map[string]json.RawMessage `json:"_meta,omitempty"`
 		}
 		if err := decodeParams(req.Params, &p); err != nil {
 			return nil, &rpcError{rpcInvalidParams, err.Error()}
@@ -430,8 +431,9 @@ func (a *API) dispatch(r *http.Request, req rpcRequest) (any, *rpcError) {
 
 func (a *API) callTool(r *http.Request, raw json.RawMessage) (any, *rpcError) {
 	var p struct {
-		Name      string          `json:"name"`
-		Arguments json.RawMessage `json:"arguments"`
+		Name      string                     `json:"name"`
+		Arguments json.RawMessage            `json:"arguments"`
+		Meta      map[string]json.RawMessage `json:"_meta,omitempty"`
 	}
 	if err := decodeRaw(raw, &p); err != nil {
 		return nil, &rpcError{rpcInvalidParams, "invalid params: " + err.Error()}
