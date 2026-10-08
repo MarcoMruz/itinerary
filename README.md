@@ -6,19 +6,19 @@ Data lives in memory and is written atomically to `data/itineraries.json` on eve
 ## Run
 
 ```sh
-go run .                       # http://localhost:8080
+go run .                       # http://localhost:9876
 go test ./...
-docker build -t itinerary . && docker run -p 8080:8080 -v itinerary-data:/root/data itinerary
+docker build -t itinerary . && docker run -p 9876:9876 -v itinerary-data:/root/data itinerary
 ```
 
 | Env          | Default                 | Purpose                                                                 |
 |--------------|-------------------------|-------------------------------------------------------------------------|
-| `PORT`       | `8080`                  | Listen port                                                             |
+| `PORT`       | `9876`                  | Listen port                                                             |
 | `DATA_FILE`  | `data/itineraries.json` | JSON storage file (seeded with the default itinerary if missing)        |
 | `API_TOKEN`  | *(empty = open)*        | When set, `POST`/`DELETE` and MCP `add_itinerary` need `Authorization: Bearer <token>` |
 | `PUBLIC_URL` | *(from request)*        | Absolute base URL placed in `openapi.json` `servers`                     |
 
-**Coolify:** use the Dockerfile build pack, port `8080`, add a persistent storage volume mounted at `/root/data`,
+**Coolify:** use the Dockerfile build pack, port `9876`, add a persistent storage volume mounted at `/root/data`,
 and set `API_TOKEN` (otherwise anyone who can reach the app can add or delete itineraries).
 
 ## Agent interfaces

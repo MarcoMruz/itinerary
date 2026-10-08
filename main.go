@@ -46,7 +46,7 @@ func run() error {
 	}
 
 	srv := &http.Server{
-		Addr:              ":" + env("PORT", "8080"),
+		Addr:              ":" + env("PORT", "9876"),
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,

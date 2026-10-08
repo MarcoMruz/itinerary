@@ -1,4 +1,4 @@
-# Multi-stage build for Coolify (port 8080).
+# Multi-stage build for Coolify (port 9876).
 # Templates and seed data are embedded in the binary; mount a persistent
 # volume at /root/data so itineraries added via API/MCP survive redeploys.
 FROM golang:1.22-alpine AS builder
@@ -14,8 +14,8 @@ RUN apk --no-cache add ca-certificates tzdata
 WORKDIR /root/
 RUN mkdir -p /root/data
 COPY --from=builder /app/app .
-EXPOSE 8080
-ENV PORT=8080 \
+EXPOSE 9876
+ENV PORT=9876 \
     DATA_FILE=/root/data/itineraries.json
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget -qO- "http://127.0.0.1:${PORT}/healthz" >/dev/null || exit 1
