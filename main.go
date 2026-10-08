@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -38,9 +39,17 @@ func run() error {
 	api := &API{
 		store:     store,
 		token:     os.Getenv("API_TOKEN"),
+		readToken: os.Getenv("READ_API_TOKEN"),
 		publicURL: strings.TrimRight(os.Getenv("PUBLIC_URL"), "/"),
 	}
-	handler, err := newHandler(store, api)
+	sec := SecurityConfig{
+		CORSOrigins:    parseOrigins(os.Getenv("CORS_ORIGINS")),
+		ClientIPHeader: os.Getenv("CLIENT_IP_HEADER"),
+		RatePerMinute:  envInt("RATE_LIMIT_PER_MINUTE", 120),
+		RateBurst:      envInt("RATE_LIMIT_BURST", 30),
+		BlockBots:      env("BLOCK_BOTS", "true") != "false",
+	}
+	handler, err := newHandler(store, api, sec)
 	if err != nil {
 		return err
 	}
@@ -76,33 +85,34 @@ func run() error {
 }
 
 // newHandler wires every route in one place.
-func newHandler(store *Store, api *API) (http.Handler, error) {
+func newHandler(store *Store, api *API, sec SecurityConfig) (http.Handler, error) {
 	tmpl, err := template.ParseFS(templateFS, "templates/index.html")
 	if err != nil {
 		return nil, err
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{$}", indexHandler(store, tmpl))
+	mux.HandleFunc("GET /{$}", indexHandler(store, api, tmpl))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
+	mux.HandleFunc("GET /robots.txt", robotsTxt)
 
 	mux.HandleFunc("GET /api/v1/openapi.json", api.openAPI)
-	mux.HandleFunc("GET /api/v1/itineraries", api.listItineraries)
-	mux.HandleFunc("GET /api/v1/itineraries/{id}", api.getItinerary)
+	mux.HandleFunc("GET /api/v1/itineraries", api.requireUIRead(api.listItineraries))
+	mux.HandleFunc("GET /api/v1/itineraries/{id}", api.requireUIRead(api.getItinerary))
 	mux.HandleFunc("POST /api/v1/itineraries", api.requireToken(api.createItinerary))
 	mux.HandleFunc("DELETE /api/v1/itineraries/{id}", api.requireToken(api.deleteItinerary))
-	mux.HandleFunc("POST /mcp", api.mcp) // reads are public; add_itinerary checks the token itself
+	mux.HandleFunc("POST /mcp", api.requireReadToken(api.mcp))
 
-	return securityHeaders(mux), nil
+	return protect(sec, mux), nil
 }
 
 // indexHandler renders the shell with the list and first itinerary inlined,
 // so the first paint needs no extra API round trip.
-func indexHandler(store *Store, tmpl *template.Template) http.HandlerFunc {
+func indexHandler(store *Store, api *API, tmpl *template.Template) http.HandlerFunc {
 	type bootData struct {
 		List   []Summary  `json:"list"`
 		Active *Itinerary `json:"active"`
 	}
-	return func(w http.ResponseWriter, _ *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
 		data := bootData{List: store.List()}
 		if len(data.List) > 0 {
 			data.Active, _ = store.Get(data.List[0].ID)
@@ -114,19 +124,10 @@ func indexHandler(store *Store, tmpl *template.Template) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Cache-Control", "private, no-cache") // sets the session cookie: never cache at the edge
+		api.setSession(w, r)
 		buf.WriteTo(w)
 	}
-}
-
-func securityHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h := w.Header()
-		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		h.Set("X-Frame-Options", "DENY")
-		next.ServeHTTP(w, r)
-	})
 }
 
 func env(key, fallback string) string {
@@ -134,4 +135,12 @@ func env(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func envInt(key string, fallback int) int {
+	n, err := strconv.Atoi(os.Getenv(key))
+	if err != nil || n < 0 {
+		return fallback
+	}
+	return n
 }

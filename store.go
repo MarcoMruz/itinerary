@@ -47,6 +47,9 @@ func OpenStore(path string, seed []byte) (*Store, error) {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 	for _, it := range list {
+		if it == nil {
+			return nil, errors.New("itinerary list contains null item")
+		}
 		if err := it.Normalize(); err != nil {
 			return nil, fmt.Errorf("itinerary %q: %w", it.ID, err)
 		}
@@ -80,19 +83,27 @@ func (s *Store) Get(id string) (*Itinerary, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	it, ok := s.items[id]
-	return it, ok
+	if !ok {
+		return nil, false
+	}
+	copy, err := cloneItinerary(it)
+	return copy, err == nil
 }
 
 // Create stores a normalized itinerary. It returns ErrExists on id collision.
 func (s *Store) Create(it *Itinerary) error {
+	copy, err := cloneItinerary(it)
+	if err != nil {
+		return err
+	}
 	return s.commit(func() (func(), error) {
-		if _, ok := s.items[it.ID]; ok {
+		if _, ok := s.items[copy.ID]; ok {
 			return nil, ErrExists
 		}
 		prev := s.order
-		s.items[it.ID] = it
-		s.order = append(slices.Clip(s.order), it.ID)
-		return func() { delete(s.items, it.ID); s.order = prev }, nil
+		s.items[copy.ID] = copy
+		s.order = append(slices.Clip(s.order), copy.ID)
+		return func() { delete(s.items, copy.ID); s.order = prev }, nil
 	})
 }
 
@@ -161,4 +172,16 @@ func writeAtomic(path string, data []byte) error {
 		return err
 	}
 	return os.Rename(tmp.Name(), path)
+}
+
+func cloneItinerary(it *Itinerary) (*Itinerary, error) {
+	data, err := json.Marshal(it)
+	if err != nil {
+		return nil, err
+	}
+	var copy Itinerary
+	if err := json.Unmarshal(data, &copy); err != nil {
+		return nil, err
+	}
+	return &copy, nil
 }

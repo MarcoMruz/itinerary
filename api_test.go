@@ -16,12 +16,18 @@ const sampleItinerary = `{"title":"Vysoké Tatry s deťmi","days":[{"activities"
 
 func newTestServer(t *testing.T, token string) (*httptest.Server, string) {
 	t.Helper()
+	return newTestServerWith(t, API{token: token}, SecurityConfig{BlockBots: true})
+}
+
+func newTestServerWith(t *testing.T, api API, sec SecurityConfig) (*httptest.Server, string) {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "data", "itineraries.json")
 	store, err := OpenStore(path, seedData)
 	if err != nil {
 		t.Fatal(err)
 	}
-	h, err := newHandler(store, &API{store: store, token: token})
+	api.store = store
+	h, err := newHandler(store, &api, sec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,8 +113,11 @@ func TestValidation(t *testing.T) {
 func TestWriteAuth(t *testing.T) {
 	srv, _ := newTestServer(t, "s3cret")
 	api := srv.URL + "/api/v1/itineraries"
-	if code, _ := do(t, "GET", api, ""); code != 200 {
-		t.Fatalf("reads must stay public, got %d", code)
+	if code, _ := do(t, "GET", api, ""); code != 401 {
+		t.Fatalf("unauthenticated read: want 401, got %d", code)
+	}
+	if code, _ := do(t, "GET", api, "", "Authorization", "Bearer s3cret"); code != 200 {
+		t.Fatalf("write token must also read, got %d", code)
 	}
 	if code, _ := do(t, "POST", api, sampleItinerary); code != 401 {
 		t.Fatalf("unauthenticated create: want 401, got %d", code)
@@ -116,9 +125,66 @@ func TestWriteAuth(t *testing.T) {
 	if code, _ := do(t, "POST", api, sampleItinerary, "Authorization", "Bearer s3cret"); code != 201 {
 		t.Fatalf("authenticated create: want 201, got %d", code)
 	}
-	_, body := do(t, "POST", srv.URL+"/mcp", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"add_itinerary","arguments":`+sampleItinerary+`}}`)
-	if !strings.Contains(string(body), `"isError":true`) {
-		t.Fatalf("unauthenticated MCP add must fail: %s", body)
+	if code, _ := do(t, "POST", srv.URL+"/mcp", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"add_itinerary","arguments":`+sampleItinerary+`}}`); code != 401 {
+		t.Fatalf("unauthenticated MCP: want 401, got %d", code)
+	}
+}
+
+func TestReadAuth(t *testing.T) {
+	srv, _ := newTestServerWith(t, API{token: "write-secret", readToken: "read-secret"}, SecurityConfig{})
+	api := srv.URL + "/api/v1/itineraries"
+	if code, _ := do(t, "GET", api, "", "Authorization", "Bearer read-secret"); code != 200 {
+		t.Fatalf("read token: want 200, got %d", code)
+	}
+	if code, _ := do(t, "POST", api, sampleItinerary, "Authorization", "Bearer read-secret"); code != 401 {
+		t.Fatalf("read token must not write, got %d", code)
+	}
+	if code, _ := do(t, "POST", srv.URL+"/mcp", `{"jsonrpc":"2.0","id":1,"method":"ping"}`); code != 401 {
+		t.Fatalf("unauthenticated MCP: want 401, got %d", code)
+	}
+	if code, b := do(t, "POST", srv.URL+"/mcp", `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"add_itinerary","arguments":`+sampleItinerary+`}}`, "Authorization", "Bearer read-secret"); code != 200 || !strings.Contains(string(b), `"isError":true`) {
+		t.Fatalf("MCP add with read token must fail: %d %s", code, b)
+	}
+}
+
+func TestReadTokenOnlyDisablesWrites(t *testing.T) {
+	srv, _ := newTestServerWith(t, API{readToken: "read-secret"}, SecurityConfig{})
+	api := srv.URL + "/api/v1/itineraries"
+	for _, auth := range []string{"", "Bearer read-secret"} {
+		if code, _ := do(t, "POST", api, sampleItinerary, "Authorization", auth); code != 401 {
+			t.Fatalf("write with %q: want 401, got %d", auth, code)
+		}
+	}
+}
+
+func TestUISessionCookieGrantsReadOnly(t *testing.T) {
+	srv, _ := newTestServer(t, "s3cret")
+	res, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	var cookie *http.Cookie
+	for _, c := range res.Cookies() {
+		if c.Name == sessionCookie {
+			cookie = c
+		}
+	}
+	if cookie == nil || !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode || cookie.Path != "/api/" {
+		t.Fatalf("session cookie: %+v", cookie)
+	}
+	api := srv.URL + "/api/v1/itineraries"
+	if code, _ := do(t, "GET", api+"/slovensky-raj-1yo", "", "Cookie", cookie.String()); code != 200 {
+		t.Fatalf("cookie read: want 200, got %d", code)
+	}
+	if code, _ := do(t, "POST", api, sampleItinerary, "Cookie", cookie.String()); code != 401 {
+		t.Fatalf("cookie must not write, got %d", code)
+	}
+	if code, _ := do(t, "POST", srv.URL+"/mcp", `{"jsonrpc":"2.0","id":1,"method":"ping"}`, "Cookie", cookie.String()); code != 401 {
+		t.Fatalf("cookie must not open MCP, got %d", code)
+	}
+	if code, _ := do(t, "GET", api, "", "Cookie", sessionCookie+"=forged"); code != 401 {
+		t.Fatalf("forged cookie: want 401, got %d", code)
 	}
 }
 
@@ -213,5 +279,46 @@ func TestOpenStoreRejectsCorruptFile(t *testing.T) {
 	os.WriteFile(path, []byte("{not json"), 0o644)
 	if _, err := OpenStore(path, seedData); err == nil {
 		t.Fatal("corrupt file must not be silently replaced")
+	}
+}
+
+func TestDecodeRejectsTrailingJSON(t *testing.T) {
+	if _, err := decodeItinerary(strings.NewReader(sampleItinerary + " {}")); err == nil {
+		t.Fatal("trailing JSON must be rejected")
+	}
+}
+
+func TestOpenStoreRejectsNullItinerary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "itineraries.json")
+	if err := os.WriteFile(path, []byte("[null]"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenStore(path, seedData); err == nil {
+		t.Fatal("null itinerary must be rejected")
+	}
+}
+
+func TestStoreDoesNotExposeMutableItineraries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "itineraries.json")
+	store, err := OpenStore(path, []byte("[]"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	it := &Itinerary{ID: "trip", Title: "Trip", Days: []Day{{Activities: []Activity{}}}}
+	if err := it.Normalize(); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Create(it); err != nil {
+		t.Fatal(err)
+	}
+	it.Title = "changed"
+	got, ok := store.Get("trip")
+	if !ok || got.Title != "Trip" {
+		t.Fatalf("store exposed mutable input: %+v", got)
+	}
+	got.Title = "changed again"
+	stored, ok := store.Get("trip")
+	if !ok || stored.Title != "Trip" {
+		t.Fatalf("store exposed mutable result: %+v", stored)
 	}
 }

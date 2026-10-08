@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -27,6 +29,7 @@ var mcpVersions = []string{"2024-11-05", "2025-03-26", "2025-06-18"}
 type API struct {
 	store     *Store
 	token     string // optional bearer token guarding writes
+	readToken string // optional bearer token guarding reads and MCP
 	publicURL string // optional absolute base URL for the OpenAPI document
 }
 
@@ -60,20 +63,89 @@ func decodeItinerary(r io.Reader) (*Itinerary, error) {
 		}
 		return nil, invalid("invalid JSON: %v", err)
 	}
+	if err := requireJSONEOF(dec); err != nil {
+		return nil, invalid("invalid JSON: %v", err)
+	}
 	return &it, nil
 }
 
+func requireJSONEOF(dec *json.Decoder) error {
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return errors.New("multiple JSON values")
+		}
+		return err
+	}
+	return nil
+}
+
+func bearerMatches(r *http.Request, token string) bool {
+	if token == "" {
+		return false
+	}
+	got, want := sha256.Sum256([]byte(r.Header.Get("Authorization"))), sha256.Sum256([]byte("Bearer "+token))
+	return subtle.ConstantTimeCompare(got[:], want[:]) == 1
+}
+
+// authorized fails closed: with only READ_API_TOKEN set, writes are disabled.
 func (a *API) authorized(r *http.Request) bool {
-	if a.token == "" {
+	return !a.readsProtected() || bearerMatches(r, a.token)
+}
+
+// canRead accepts either token once any token is configured; withSession also accepts the UI cookie.
+func (a *API) canRead(r *http.Request, withSession bool) bool {
+	if !a.readsProtected() {
 		return true
 	}
-	got := r.Header.Get("Authorization")
-	return subtle.ConstantTimeCompare([]byte(got), []byte("Bearer "+a.token)) == 1
+	return bearerMatches(r, a.token) || bearerMatches(r, a.readToken) || (withSession && a.validSession(r))
+}
+
+func (a *API) readsProtected() bool { return a.token != "" || a.readToken != "" }
+
+func (a *API) sessionValue() string { return sessionMAC(a.token + "\x00" + a.readToken) }
+
+func (a *API) validSession(r *http.Request) bool {
+	c, err := r.Cookie(sessionCookie)
+	return err == nil && hmac.Equal([]byte(c.Value), []byte(a.sessionValue()))
+}
+
+// setSession gives the web UI read access to the API without exposing a token to JS.
+func (a *API) setSession(w http.ResponseWriter, r *http.Request) {
+	if !a.readsProtected() {
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookie,
+		Value:    a.sessionValue(),
+		Path:     "/api/",
+		HttpOnly: true,
+		Secure:   isHTTPS(r),
+		SameSite: http.SameSiteStrictMode,
+	})
 }
 
 func (a *API) requireToken(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !a.authorized(r) {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			writeError(w, http.StatusUnauthorized, "missing or invalid bearer token")
+			return
+		}
+		next(w, r)
+	}
+}
+
+func (a *API) requireReadToken(next http.HandlerFunc) http.HandlerFunc {
+	return a.requireRead(false, next)
+}
+
+// requireUIRead also accepts the web UI session cookie.
+func (a *API) requireUIRead(next http.HandlerFunc) http.HandlerFunc { return a.requireRead(true, next) }
+
+func (a *API) requireRead(withSession bool, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !a.canRead(r, withSession) {
 			w.Header().Set("WWW-Authenticate", "Bearer")
 			writeError(w, http.StatusUnauthorized, "missing or invalid bearer token")
 			return
@@ -162,7 +234,12 @@ func (a *API) openAPI(w http.ResponseWriter, r *http.Request) {
 	errResp := func(desc string) schema { return resp(desc, ref("Error")) }
 	idParam := []schema{{"name": "id", "in": "path", "required": true, "schema": schema{"type": "string"}}}
 
-	secured := func(op schema) schema { return op }
+	withBearer := func(op schema) schema {
+		op["security"] = []schema{{"bearerAuth": []string{}}}
+		op["responses"].(schema)["401"] = errResp("Unauthorized")
+		return op
+	}
+	secured, readSecured := func(op schema) schema { return op }, func(op schema) schema { return op }
 	components := schema{
 		"schemas": schema{
 			"Summary": schema{"type": "object", "properties": schema{
@@ -173,12 +250,12 @@ func (a *API) openAPI(w http.ResponseWriter, r *http.Request) {
 			"Error":     schema{"type": "object", "properties": schema{"error": schema{"type": "string"}}},
 		},
 	}
-	if a.token != "" {
+	if a.readsProtected() {
 		components["securitySchemes"] = schema{"bearerAuth": schema{"type": "http", "scheme": "bearer"}}
-		secured = func(op schema) schema {
-			op["security"] = []schema{{"bearerAuth": []string{}}}
-			return op
-		}
+		readSecured = withBearer
+	}
+	if a.token != "" {
+		secured = withBearer
 	}
 
 	doc := schema{
@@ -192,31 +269,32 @@ func (a *API) openAPI(w http.ResponseWriter, r *http.Request) {
 		"components": components,
 		"paths": schema{
 			"/api/v1/itineraries": schema{
-				"get": schema{
+				"get": readSecured(schema{
 					"operationId": "listItineraries", "summary": "List all itineraries",
 					"responses": schema{"200": resp("Itinerary summaries", schema{"type": "array", "items": ref("Summary")})},
-				},
+				}),
 				"post": secured(schema{
 					"operationId": "createItinerary", "summary": "Create an itinerary",
 					"requestBody": schema{"required": true, "content": jsonBody(ref("Itinerary"))},
 					"responses": schema{
 						"201": resp("Created", ref("Itinerary")), "400": errResp("Validation error"),
-						"401": errResp("Unauthorized"), "409": errResp("Id already exists"),
+						"409": errResp("Id already exists"),
 					},
 				}),
 			},
 			"/api/v1/itineraries/{id}": schema{
-				"get": schema{
+				"get": readSecured(schema{
 					"operationId": "getItinerary", "summary": "Get itinerary detail incl. days and checklist", "parameters": idParam,
 					"responses": schema{"200": resp("Itinerary", ref("Itinerary")), "404": errResp("Not found")},
-				},
+				}),
 				"delete": secured(schema{
 					"operationId": "deleteItinerary", "summary": "Delete an itinerary", "parameters": idParam,
-					"responses": schema{"204": resp("Deleted", nil), "401": errResp("Unauthorized"), "404": errResp("Not found")},
+					"responses": schema{"204": resp("Deleted", nil), "404": errResp("Not found")},
 				}),
 			},
 		},
 	}
+	w.Header().Set("Cache-Control", "public, max-age=300")
 	writeJSON(w, http.StatusOK, doc)
 }
 
@@ -225,18 +303,28 @@ func (a *API) baseURL(r *http.Request) string {
 		return a.publicURL
 	}
 	scheme := "http"
-	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+	if isHTTPS(r) {
 		scheme = "https"
 	}
 	return scheme + "://" + r.Host
+}
+
+func isHTTPS(r *http.Request) bool {
+	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
 // ---------- MCP (JSON-RPC 2.0 over Streamable HTTP, JSON responses) ----------
 
 func (a *API) mcp(w http.ResponseWriter, r *http.Request) {
 	var req rpcRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes)).Decode(&req); err != nil {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
 		writeJSON(w, http.StatusOK, rpcResponse{JSONRPC: "2.0", Error: &rpcError{rpcParseError, "parse error: " + err.Error()}})
+		return
+	}
+	if err := requireJSONEOF(dec); err != nil {
+		writeJSON(w, http.StatusOK, rpcResponse{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{rpcInvalidRequest, "invalid JSON-RPC request: " + err.Error()}})
 		return
 	}
 	if req.JSONRPC != "2.0" || req.Method == "" {
@@ -256,8 +344,12 @@ func (a *API) dispatch(r *http.Request, req rpcRequest) (any, *rpcError) {
 	case "initialize":
 		var p struct {
 			ProtocolVersion string `json:"protocolVersion"`
+			Capabilities    any    `json:"capabilities"`
+			ClientInfo      any    `json:"clientInfo"`
 		}
-		_ = json.Unmarshal(req.Params, &p)
+		if err := decodeParams(req.Params, &p); err != nil {
+			return nil, &rpcError{rpcInvalidParams, err.Error()}
+		}
 		version := mcpVersions[len(mcpVersions)-1]
 		if slices.Contains(mcpVersions, p.ProtocolVersion) {
 			version = p.ProtocolVersion
@@ -284,8 +376,11 @@ func (a *API) callTool(r *http.Request, raw json.RawMessage) (any, *rpcError) {
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
 	}
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := decodeRaw(raw, &p); err != nil {
 		return nil, &rpcError{rpcInvalidParams, "invalid params: " + err.Error()}
+	}
+	if p.Name == "" {
+		return nil, &rpcError{rpcInvalidParams, "tool name is required"}
 	}
 	switch p.Name {
 	case "list_itineraries":
@@ -294,7 +389,12 @@ func (a *API) callTool(r *http.Request, raw json.RawMessage) (any, *rpcError) {
 		var args struct {
 			ID string `json:"id"`
 		}
-		_ = json.Unmarshal(p.Arguments, &args)
+		if err := decodeRaw(p.Arguments, &args); err != nil {
+			return nil, &rpcError{rpcInvalidParams, "invalid arguments: " + err.Error()}
+		}
+		if args.ID == "" {
+			return nil, &rpcError{rpcInvalidParams, "id is required"}
+		}
 		it, ok := a.store.Get(args.ID)
 		if !ok {
 			return toolError(fmt.Sprintf("itinerary %q not found; call list_itineraries for valid ids", args.ID)), nil
@@ -315,6 +415,25 @@ func (a *API) callTool(r *http.Request, raw json.RawMessage) (any, *rpcError) {
 	default:
 		return nil, &rpcError{rpcInvalidParams, "unknown tool: " + p.Name}
 	}
+}
+
+func decodeParams(raw json.RawMessage, dst any) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	return decodeRaw(raw, dst)
+}
+
+func decodeRaw(raw json.RawMessage, dst any) error {
+	if len(raw) == 0 {
+		return errors.New("object is required")
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		return err
+	}
+	return requireJSONEOF(dec)
 }
 
 func toolJSON(v any) mcpToolResult {
