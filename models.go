@@ -16,6 +16,7 @@ type Activity struct {
 	Time     string `json:"time"`
 	Title    string `json:"title"`
 	Location string `json:"location,omitempty"`
+	Place    string `json:"place,omitempty"` // geocodable stop; activities with a place form the day route
 	MapsURL  string `json:"mapsUrl,omitempty"`
 	Badge    string `json:"badge,omitempty"`
 }
@@ -34,6 +35,7 @@ type Itinerary struct {
 	Subtitle       string   `json:"subtitle,omitempty"`
 	Duration       string   `json:"duration,omitempty"`
 	TargetAudience string   `json:"targetAudience,omitempty"`
+	StartLocation  string   `json:"startLocation,omitempty"` // default origin of every day route, e.g. the hotel
 	MapsURL        string   `json:"mapsUrl,omitempty"`
 	Days           []Day    `json:"days"`
 	Checklist      []string `json:"checklist"`
@@ -80,7 +82,7 @@ func (it *Itinerary) Normalize() error {
 		name string
 		v    *string
 	}{{"id", &it.ID}, {"title", &it.Title}, {"subtitle", &it.Subtitle}, {"duration", &it.Duration},
-		{"targetAudience", &it.TargetAudience}, {"mapsUrl", &it.MapsURL}} {
+		{"targetAudience", &it.TargetAudience}, {"startLocation", &it.StartLocation}, {"mapsUrl", &it.MapsURL}} {
 		if err := cleanText(f.name, f.v); err != nil {
 			return err
 		}
@@ -143,7 +145,7 @@ func (d *Day) normalize(i int) error {
 		for _, f := range []struct {
 			name string
 			v    *string
-		}{{"time", &a.Time}, {"title", &a.Title}, {"location", &a.Location}, {"mapsUrl", &a.MapsURL}, {"badge", &a.Badge}} {
+		}{{"time", &a.Time}, {"title", &a.Title}, {"location", &a.Location}, {"place", &a.Place}, {"mapsUrl", &a.MapsURL}, {"badge", &a.Badge}} {
 			if err := cleanText(af+"."+f.name, f.v); err != nil {
 				return err
 			}
@@ -154,8 +156,15 @@ func (d *Day) normalize(i int) error {
 		if err := checkURL(af+".mapsUrl", a.MapsURL); err != nil {
 			return err
 		}
+		if a.MapsURL == "" && a.Place != "" {
+			a.MapsURL = mapsSearchURL(a.Place)
+		}
 	}
 	return nil
+}
+
+func mapsSearchURL(place string) string {
+	return "https://www.google.com/maps/search/?api=1&query=" + url.QueryEscape(place)
 }
 
 func cleanText(field string, s *string) error {
@@ -231,7 +240,8 @@ var activitySchema = schema{
 	"properties": schema{
 		"time":     strProp("Time window, e.g. '09:00 - 11:30' or '15:00+'"),
 		"title":    strProp("What happens"),
-		"location": strProp("Place name"),
+		"location": strProp("Human readable place name"),
+		"place":    strProp("Geocodable Google Maps place/address. Activities with a place become numbered stops of the day route; mapsUrl is derived from it when omitted"),
 		"mapsUrl":  strProp("Absolute http(s) Google Maps URL"),
 		"badge":    strProp("Short tag shown as a badge, e.g. 'Relax'"),
 	},
@@ -248,6 +258,7 @@ var itinerarySchema = schema{
 		"subtitle":       strProp("Short tagline"),
 		"duration":       strProp("Human readable length; derived from day count when omitted"),
 		"targetAudience": strProp("Who the trip is for, e.g. '2 adults + 1-year-old'"),
+		"startLocation":  strProp("Optional origin of every day route, e.g. the hotel you stay at; empty = traveller's current location"),
 		"mapsUrl":        strProp("Absolute http(s) Google Maps route link for the whole trip"),
 		"days": schema{
 			"type": "array", "minItems": 1, "maxItems": maxDays,

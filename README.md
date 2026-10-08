@@ -27,6 +27,8 @@ and set `API_TOKEN` (otherwise anyone who can reach the app can add or delete it
 - OpenAPI 3.1: `GET /api/v1/openapi.json` (GPT Actions, custom tools)
 - MCP: `POST /mcp` (JSON-RPC 2.0, Streamable HTTP with JSON responses). Tools: `list_itineraries`, `get_itinerary_detail`, `add_itinerary`
 
+Routes: activities with a `place` become numbered stops of their day route; the optional itinerary `startLocation` (e.g. your hotel) is the origin of every day route and can be overridden in the UI (saved per itinerary in the browser). Without a start, Google Maps starts at the current location.
+
 ```sh
 claude mcp add --transport http itinerary https://your-host/mcp --header "Authorization: Bearer $API_TOKEN"
 ```

@@ -195,6 +195,19 @@ func TestIndexAndOpenAPI(t *testing.T) {
 	}
 }
 
+func TestPlaceDerivesMapsURL(t *testing.T) {
+	it := Itinerary{Title: "x", StartLocation: " Hotel Park ", Days: []Day{{Activities: []Activity{{Time: "9", Title: "a", Place: "Koliba Podlesok"}}}}}
+	if err := it.Normalize(); err != nil {
+		t.Fatal(err)
+	}
+	if got := it.Days[0].Activities[0].MapsURL; got != "https://www.google.com/maps/search/?api=1&query=Koliba+Podlesok" {
+		t.Fatalf("derived mapsUrl: %s", got)
+	}
+	if it.StartLocation != "Hotel Park" {
+		t.Fatalf("startLocation not trimmed: %q", it.StartLocation)
+	}
+}
+
 func TestOpenStoreRejectsCorruptFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "itineraries.json")
 	os.WriteFile(path, []byte("{not json"), 0o644)

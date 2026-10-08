@@ -41,7 +41,7 @@
           <div class="mt-4 flex flex-wrap items-center gap-2 text-sm">
             <span x-show="current.duration" class="rounded-full bg-white/15 px-3 py-1" x-text="'🗓 ' + current.duration"></span>
             <span x-show="current.targetAudience" class="rounded-full bg-white/15 px-3 py-1" x-text="'👨‍👩‍👧 ' + current.targetAudience"></span>
-            <a x-show="current.mapsUrl" :href="current.mapsUrl" target="_blank" rel="noopener noreferrer"
+            <a x-show="tripUrl" :href="tripUrl" target="_blank" rel="noopener noreferrer"
                class="inline-flex items-center gap-1.5 rounded-full bg-amber-400 px-4 py-1.5 font-semibold text-emerald-950 shadow hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-white">
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 20l-5.4-2.7A1 1 0 013 16.4V5.6a1 1 0 011.4-.9L9 7m0 13l6-3m-6 3V7m6 10l4.6 2.3a1 1 0 001.4-.9V7.6a1 1 0 00-.6-.9L15 4m0 13V4m0 0L9 7"/></svg>
               Celá trasa v Mapách
@@ -75,10 +75,47 @@
             </template>
           </nav>
 
+          <div class="mt-4 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-stone-200 sm:p-5" x-show="day">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <h2 class="flex items-center gap-2 font-bold text-stone-900">
+                <svg class="h-5 w-5 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 20l-5.4-2.7A1 1 0 013 16.4V5.6a1 1 0 011.4-.9L9 7m0 13l6-3m-6 3V7m6 10l4.6 2.3a1 1 0 001.4-.9V7.6a1 1 0 00-.6-.9L15 4m0 13V4m0 0L9 7"/></svg>
+                <span x-text="'Trasa dňa · ' + (day ? day.label : '')"></span>
+              </h2>
+              <a x-show="dayRoute.url" :href="dayRoute.url" target="_blank" rel="noopener noreferrer"
+                 class="inline-flex items-center gap-1.5 rounded-xl bg-amber-400 px-4 py-2 text-sm font-semibold text-emerald-950 shadow-sm hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                Otvoriť trasu v Mapách ↗
+              </a>
+            </div>
+            <label class="mt-3 block">
+              <span class="text-xs font-semibold uppercase tracking-wide text-stone-500">Štart (voliteľný)</span>
+              <input type="text" :value="start" @input="start = $event.target.value; saveStart()" autocomplete="off"
+                     placeholder="napr. hotel, v ktorom ste ubytovaní"
+                     class="mt-1 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200">
+            </label>
+            <p class="mt-1 text-xs text-stone-400" x-show="!start.trim()">Bez štartu začne trasa vo vašej aktuálnej polohe. Platí pre všetky dni tohto itinerára.</p>
+            <ol class="mt-3 flex flex-wrap items-center gap-x-1.5 gap-y-2 text-sm" x-show="dayRoute.stops.length">
+              <li x-show="start.trim()" class="inline-flex items-center gap-1.5 rounded-full bg-amber-50 py-1 pl-1 pr-3 ring-1 ring-amber-200">
+                <span class="flex h-5 w-5 items-center justify-center rounded-full bg-amber-400 text-[11px] font-bold text-emerald-950">S</span>
+                <span x-text="start.trim()"></span>
+              </li>
+              <template x-for="(s, k) in dayRoute.stops" :key="k">
+                <li class="inline-flex items-center gap-1.5">
+                  <span class="text-stone-300" x-show="k > 0 || start.trim()" aria-hidden="true">→</span>
+                  <span class="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 py-1 pl-1 pr-3 ring-1 ring-emerald-200">
+                    <span class="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-700 text-[11px] font-bold text-white" x-text="k + 1"></span>
+                    <span x-text="s"></span>
+                  </span>
+                </li>
+              </template>
+            </ol>
+            <p class="mt-3 text-sm text-stone-500" x-show="!dayRoute.stops.length">Tento deň nemá žiadne body na mape.</p>
+          </div>
+
           <ol class="relative mt-4 space-y-4 border-l-2 border-emerald-200 pl-6 sm:pl-8" x-show="day">
             <template x-for="(a, j) in (day ? day.activities : [])" :key="dayIndex + '-' + j">
               <li class="relative">
-                <span class="absolute -left-[33px] top-5 h-4 w-4 rounded-full border-4 border-stone-50 bg-emerald-600 sm:-left-[41px]" aria-hidden="true"></span>
+                <span x-show="dayRoute.nums[j]" class="absolute -left-[37px] top-4 flex h-6 w-6 items-center justify-center rounded-full bg-emerald-700 text-xs font-bold text-white ring-4 ring-stone-50 sm:-left-[45px]" x-text="dayRoute.nums[j]"></span>
+                <span x-show="!dayRoute.nums[j]" class="absolute -left-[33px] top-5 h-4 w-4 rounded-full border-4 border-stone-50 bg-emerald-300 sm:-left-[41px]" aria-hidden="true"></span>
                 <article class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-stone-200 transition hover:shadow-md sm:p-5">
                   <div class="flex flex-wrap items-center gap-2">
                     <span class="inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-2.5 py-1 font-mono text-xs font-semibold text-emerald-800">
@@ -153,12 +190,14 @@ function itineraryApp() {
     selectedId: boot.active ? boot.active.id : '',
     dayIndex: 0,
     checked: [],
+    start: '',
     loading: false,
     error: '',
 
     init: function () {
       var self = this;
       this.loadChecked();
+      this.loadStart();
       this.openFromHash();
       window.addEventListener('hashchange', function () { self.openFromHash(); });
       // Pick up itineraries added by agents while the tab was in the background.
@@ -174,6 +213,38 @@ function itineraryApp() {
       var self = this;
       var done = items.filter(function (c) { return self.checked.indexOf(c) !== -1; }).length;
       return { done: done, total: items.length, pct: items.length ? Math.round(done * 100 / items.length) : 0 };
+    },
+
+    // Route stops of one day: activities with a place, consecutive duplicates merged.
+    // nums[j] is the stop number of activity j (0 = not a stop).
+    get dayRoute() {
+      var stops = [], nums = [];
+      (this.day ? this.day.activities : []).forEach(function (a) {
+        if (a.place && a.place !== stops[stops.length - 1]) stops.push(a.place);
+        nums.push(a.place ? stops.length : 0);
+      });
+      return { stops: stops, nums: nums, url: this.routeUrl(stops) };
+    },
+
+    get tripUrl() {
+      if (!this.current) return '';
+      if (this.current.mapsUrl) return this.current.mapsUrl;
+      var stops = [];
+      this.current.days.forEach(function (d) {
+        d.activities.forEach(function (a) { if (a.place && a.place !== stops[stops.length - 1]) stops.push(a.place); });
+      });
+      return this.routeUrl(stops);
+    },
+
+    // Google Maps directions URL; without an origin Maps starts at the current location.
+    routeUrl: function (stops) {
+      if (!stops.length) return '';
+      var p = new URLSearchParams({ api: '1', travelmode: 'driving' });
+      var origin = this.start.trim();
+      if (origin) p.set('origin', origin);
+      p.set('destination', stops[stops.length - 1]);
+      if (stops.length > 1) p.set('waypoints', stops.slice(0, -1).join('|'));
+      return 'https://www.google.com/maps/dir/?' + p.toString();
     },
 
     openFromHash: function () {
@@ -205,6 +276,7 @@ function itineraryApp() {
       this.current = it;
       this.dayIndex = 0;
       this.loadChecked();
+      this.loadStart();
     },
 
     refreshList: async function () {
@@ -219,6 +291,17 @@ function itineraryApp() {
     loadChecked: function () {
       try { this.checked = JSON.parse(localStorage.getItem(this.storageKey())) || []; }
       catch (e) { this.checked = []; }
+    },
+
+    // Start defaults to the itinerary's startLocation; a user edit (even clearing it) wins.
+    loadStart: function () {
+      var saved = null;
+      try { saved = localStorage.getItem('start_' + (this.current ? this.current.id : '')); } catch (e) { /* storage unavailable */ }
+      this.start = saved !== null ? saved : ((this.current && this.current.startLocation) || '');
+    },
+
+    saveStart: function () {
+      try { localStorage.setItem('start_' + this.current.id, this.start); } catch (e) { /* storage unavailable */ }
     },
 
     save: function () {

@@ -14,12 +14,14 @@
             "time": "09:00 - 11:30",
             "title": "Tomášovský výhľad (nosič)",
             "location": "Parkovisko Spišské Tomášovce",
+            "place": "Parkovisko Spišské Tomášovce",
             "mapsUrl": "https://www.google.com/maps/search/?api=1&query=Parkovisko+Spišské+Tomášovce"
           },
           {
             "time": "12:00 - 15:00",
             "title": "Spánok v aute & Obed na terase",
             "location": "Spišský salaš",
+            "place": "Spišský salaš",
             "mapsUrl": "https://www.google.com/maps/search/?api=1&query=Spišský+salaš"
           },
           {
@@ -37,6 +39,7 @@
             "time": "09:00 - 11:30",
             "title": "Stratenský kaňon (chôdza/nosič) & Dedinky",
             "location": "Stratenský kaňon parkovisko",
+            "place": "Stratenský kaňon parkovisko",
             "mapsUrl": "https://www.google.com/maps/search/?api=1&query=Stratenský+kaňon+parkovisko"
           },
           {
@@ -66,12 +69,14 @@
             "time": "10:00 - 11:30",
             "title": "Podlesok ➔ Hrdlo Hornádu",
             "location": "Podlesok parkovisko",
+            "place": "Podlesok parkovisko",
             "mapsUrl": "https://www.google.com/maps/search/?api=1&query=Podlesok+parkovisko"
           },
           {
             "time": "12:00 - 15:00",
             "title": "Spánok v aute & Záverečný obed",
             "location": "Koliba Podlesok",
+            "place": "Koliba Podlesok",
             "mapsUrl": "https://www.google.com/maps/search/?api=1&query=Koliba+Podlesok"
           }
         ]
