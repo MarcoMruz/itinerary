@@ -235,7 +235,7 @@ func (g *Geo) locate(ctx context.Context, place string, persist bool) (*point, b
 		DisplayName string `json:"display_name"`
 	}
 	q := url.Values{"q": {place}, "format": {"jsonv2"}, "limit": {"1"}}
-	if err := g.get(ctx, g.geocodeURL+"?"+q.Encode(), &hits, false); err != nil {
+	if err := g.get(ctx, "geocode", g.geocodeURL+"?"+q.Encode(), &hits, false); err != nil {
 		return nil, false
 	}
 	if len(hits) > 0 {
@@ -273,7 +273,7 @@ func (g *Geo) leg(ctx context.Context, a, b point, persist bool) (*Leg, bool) {
 		Routes []struct{ Distance, Duration float64 }
 	}
 	u := fmt.Sprintf("%s/%.6f,%.6f;%.6f,%.6f?overview=false", g.routeURL, a.Lon, a.Lat, b.Lon, b.Lat)
-	if err := g.get(ctx, u, &res, true); err != nil {
+	if err := g.get(ctx, "route", u, &res, true); err != nil {
 		return nil, false
 	}
 	switch {
@@ -282,7 +282,7 @@ func (g *Geo) leg(ctx context.Context, a, b point, persist bool) (*Leg, bool) {
 	case res.Code == "NoRoute" || res.Code == "NoSegment":
 		// final answer: no road between the points, cache as nil
 	default:
-		log.Printf("geo route %s: unexpected code %q", key, res.Code)
+		log.Printf("geo route: unexpected OSRM code %q", res.Code)
 		return nil, false
 	}
 	g.mu.Lock()
@@ -329,9 +329,11 @@ func (g *Geo) persist() {
 }
 
 // get performs one rate-limited GET and decodes the JSON body into dst.
+// op names the call in logs; the URL is never logged because it carries the
+// visitor's start text or coordinates.
 // Other statuses are errors and therefore never cached; OSRM answers
 // "no route" with 400, so the route call accepts it.
-func (g *Geo) get(ctx context.Context, u string, dst any, accept400 bool) error {
+func (g *Geo) get(ctx context.Context, op, u string, dst any, accept400 bool) error {
 	select {
 	case g.slot <- struct{}{}:
 	case <-ctx.Done():
@@ -364,7 +366,11 @@ func (g *Geo) get(ctx context.Context, u string, dst any, accept400 bool) error 
 		}
 	}
 	if err != nil && ctx.Err() == nil {
-		log.Printf("geo GET %s failed after %dms: %v", req.URL.Host+req.URL.Path, time.Since(began).Milliseconds(), err)
+		var uerr *url.Error
+		if errors.As(err, &uerr) {
+			err = uerr.Err // url.Error's message repeats the full URL
+		}
+		log.Printf("geo %s failed after %dms: %v", op, time.Since(began).Milliseconds(), err)
 	}
 	return err
 }

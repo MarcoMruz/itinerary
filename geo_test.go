@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -305,5 +306,19 @@ func TestDayLegsGlobalStartCap(t *testing.T) {
 	}
 	if code, _ := do(t, "GET", base, ""); code != 200 {
 		t.Fatalf("stops without a start are never capped: %d", code)
+	}
+}
+
+func TestGeoLogsNoStartText(t *testing.T) {
+	var buf strings.Builder
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	g := NewGeo(filepath.Join(t.TempDir(), "geo-cache.json"), "test-agent")
+	g.geocodeURL, g.interval = "http://127.0.0.1:1/search", 0 // nothing listens: connection refused
+	g.Route(context.Background(), "Secret Hotel 12", []string{"Lake"})
+
+	if out := buf.String(); !strings.Contains(out, "geo geocode failed") || strings.Contains(out, "Secret") || strings.Contains(out, "127.0.0.1:1/search") {
+		t.Fatalf("log leaks the request: %q", out)
 	}
 }
