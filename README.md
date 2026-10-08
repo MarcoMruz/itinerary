@@ -49,9 +49,15 @@ Cloudflare setup:
 
 ## Agent interfaces
 
-- REST: `GET|POST /api/v1/itineraries`, `GET|DELETE /api/v1/itineraries/{id}`
+- REST: `GET|POST /api/v1/itineraries`, `GET|PATCH|DELETE /api/v1/itineraries/{id}`
 - OpenAPI 3.1: `GET /api/v1/openapi.json` (GPT Actions, custom tools)
-- MCP: `POST /mcp` (JSON-RPC 2.0, Streamable HTTP with JSON responses). Tools: `list_itineraries`, `get_itinerary_detail`, `add_itinerary`
+- MCP: `POST /mcp` (JSON-RPC 2.0, Streamable HTTP with JSON responses). Tools: `list_itineraries`, `get_itinerary_detail`, `add_itinerary`, `update_itinerary`
+
+Edit with `PATCH /api/v1/itineraries/{id}` and a body such as `{"checklist":["Water","Rain jacket"]}`,
+or MCP `update_itinerary` with `{"id":"slovensky-raj-1yo","changes":{"checklist":["Water","Rain jacket"]}}`.
+Only supplied fields change. Arrays replace in full; `checklist: []` clears the list and an empty string clears optional text.
+IDs cannot change. Empty updates, null values, unknown fields and invalid itineraries are rejected.
+Updates require the write token, return the updated itinerary, and never create a missing itinerary.
 
 Routes: activities with a `place` become numbered stops of their day route; the optional itinerary `startLocation` (e.g. your hotel) is the origin of every day route and can be overridden in the UI (saved per itinerary in the browser). Without a start, Google Maps starts at the current location.
 

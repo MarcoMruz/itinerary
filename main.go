@@ -117,6 +117,7 @@ func newHandler(store *Store, api *API, sec SecurityConfig) (http.Handler, error
 	mux.HandleFunc("GET /api/v1/itineraries/{id}", api.requireUIRead(api.getItinerary))
 	mux.HandleFunc("GET /api/v1/itineraries/{id}/days/{day}/legs", api.requireUIRead(api.getDayLegs))
 	mux.HandleFunc("POST /api/v1/itineraries", api.requireToken(api.createItinerary))
+	mux.HandleFunc("PATCH /api/v1/itineraries/{id}", api.requireToken(api.patchItinerary))
 	mux.HandleFunc("DELETE /api/v1/itineraries/{id}", api.requireToken(api.deleteItinerary))
 	mux.HandleFunc("POST /mcp", api.requireReadToken(api.mcp))
 

@@ -107,6 +107,57 @@ func (s *Store) Create(it *Itinerary) error {
 	})
 }
 
+func (s *Store) Update(id string, changes map[string]json.RawMessage) (*Itinerary, error) {
+	var updated *Itinerary
+	err := s.commit(func() (func(), error) {
+		previous, ok := s.items[id]
+		if !ok {
+			return nil, ErrNotFound
+		}
+		if len(changes) == 0 {
+			return nil, invalid("changes must contain at least one field")
+		}
+		data, err := json.Marshal(previous)
+		if err != nil {
+			return nil, err
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(data, &fields); err != nil {
+			return nil, err
+		}
+		for key, value := range changes {
+			if _, ok := itineraryUpdateSchema["properties"].(schema)[key]; !ok {
+				return nil, invalid("unknown or immutable field %q", key)
+			}
+			if string(value) == "null" {
+				return nil, invalid("%s must not be null", key)
+			}
+			fields[key] = value
+		}
+		data, err = json.Marshal(fields)
+		if err != nil {
+			return nil, err
+		}
+		var next Itinerary
+		if err := decodeRaw(data, &next); err != nil {
+			return nil, invalid("invalid changes: %v", err)
+		}
+		if err := next.Normalize(); err != nil {
+			return nil, err
+		}
+		updated, err = cloneItinerary(&next)
+		if err != nil {
+			return nil, err
+		}
+		s.items[id] = &next
+		return func() { s.items[id] = previous }, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return updated, nil
+}
+
 // Delete removes an itinerary. It returns ErrNotFound for unknown ids.
 func (s *Store) Delete(id string) error {
 	return s.commit(func() (func(), error) {

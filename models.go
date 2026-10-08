@@ -287,6 +287,20 @@ var itinerarySchema = schema{
 	},
 }
 
+var itineraryUpdateSchema = func() schema {
+	properties := schema{}
+	for key, value := range itinerarySchema["properties"].(schema) {
+		if key != "id" {
+			properties[key] = value
+		}
+	}
+	return schema{
+		"type": "object", "minProperties": 1, "additionalProperties": false,
+		"description": "Fields to change. Omitted fields stay unchanged; arrays are replaced in full. Use an empty checklist to clear it, or empty strings to clear optional text. Null is not accepted.",
+		"properties":  properties,
+	}
+}()
+
 // ---------- MCP (JSON-RPC 2.0) ----------
 
 type rpcRequest struct {
@@ -332,6 +346,14 @@ type mcpToolResult struct {
 }
 
 var mcpTools = []mcpTool{
+	{
+		Name:        "update_itinerary",
+		Description: "Edit an existing itinerary. Omitted fields stay unchanged; supplied arrays replace existing arrays. Returns the updated itinerary. Requires write access.",
+		InputSchema: schema{"type": "object", "required": []string{"id", "changes"}, "additionalProperties": false, "properties": schema{
+			"id":      strProp("Existing itinerary id from list_itineraries; cannot be changed"),
+			"changes": itineraryUpdateSchema,
+		}},
+	},
 	{
 		Name:        "list_itineraries",
 		Description: "List all family travel itineraries (id, title, subtitle, duration, targetAudience).",

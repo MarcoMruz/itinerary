@@ -82,6 +82,19 @@ func decodeItinerary(r io.Reader) (*Itinerary, error) {
 	return &it, nil
 }
 
+func (a *API) updateItinerary(id string, changes map[string]json.RawMessage) (*Itinerary, error) {
+	if !idPattern.MatchString(id) {
+		return nil, invalid("valid itinerary id is required")
+	}
+	it, err := a.store.Update(id, changes)
+	if err == nil && a.geo != nil {
+		if _, changed := changes["days"]; changed {
+			go a.geo.Warm(it)
+		}
+	}
+	return it, err
+}
+
 func requireJSONEOF(dec *json.Decoder) error {
 	var extra any
 	if err := dec.Decode(&extra); err != io.EOF {
@@ -203,6 +216,29 @@ func (a *API) deleteItinerary(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (a *API) patchItinerary(w http.ResponseWriter, r *http.Request) {
+	var changes map[string]json.RawMessage
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	err := dec.Decode(&changes)
+	if err == nil {
+		err = requireJSONEOF(dec)
+	}
+	if err != nil {
+		var tooBig *http.MaxBytesError
+		if !errors.As(err, &tooBig) {
+			err = invalid("invalid JSON: %v", err)
+		}
+		writeErr(w, err)
+		return
+	}
+	it, err := a.updateItinerary(r.PathValue("id"), changes)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, it)
+}
+
 const startLookupsGlobalPerMinute = 30
 
 const legsTimeout = 20 * time.Second // below the server WriteTimeout; unfinished legs come back null with complete=false
@@ -303,15 +339,16 @@ func (a *API) openAPI(w http.ResponseWriter, r *http.Request) {
 				"id": schema{"type": "string"}, "title": schema{"type": "string"}, "subtitle": schema{"type": "string"},
 				"duration": schema{"type": "string"}, "targetAudience": schema{"type": "string"},
 			}},
-			"Itinerary": itinerarySchema,
-			"Error":     schema{"type": "object", "properties": schema{"error": schema{"type": "string"}}},
+			"Itinerary":       itinerarySchema,
+			"ItineraryUpdate": itineraryUpdateSchema,
+			"Error":           schema{"type": "object", "properties": schema{"error": schema{"type": "string"}}},
 		},
 	}
 	if a.readsProtected() {
 		components["securitySchemes"] = schema{"bearerAuth": schema{"type": "http", "scheme": "bearer"}}
 		readSecured = withBearer
 	}
-	if a.token != "" {
+	if a.readsProtected() {
 		secured = withBearer
 	}
 
@@ -340,6 +377,11 @@ func (a *API) openAPI(w http.ResponseWriter, r *http.Request) {
 				}),
 			},
 			"/api/v1/itineraries/{id}": schema{
+				"patch": secured(schema{
+					"operationId": "updateItinerary", "summary": "Edit supplied fields of an existing itinerary; arrays replace in full", "parameters": idParam,
+					"requestBody": schema{"required": true, "content": jsonBody(ref("ItineraryUpdate"))},
+					"responses":   schema{"200": resp("Updated itinerary", ref("Itinerary")), "400": errResp("Validation error"), "404": errResp("Not found"), "413": errResp("Request body too large")},
+				}),
 				"get": readSecured(schema{
 					"operationId": "getItinerary", "summary": "Get itinerary detail incl. days and checklist", "parameters": idParam,
 					"responses": schema{"200": resp("Itinerary", ref("Itinerary")), "404": errResp("Not found")},
@@ -416,7 +458,7 @@ func (a *API) dispatch(r *http.Request, req rpcRequest) (any, *rpcError) {
 			"protocolVersion": version,
 			"capabilities":    schema{"tools": schema{"listChanged": false}},
 			"serverInfo":      schema{"name": appName, "version": appVersion},
-			"instructions":    "Family travel itineraries. Use list_itineraries to discover ids, get_itinerary_detail for days/activities/checklist, add_itinerary to create one. Give each activity place and the startLocation as an official map name or street address, so driving distances can be computed.",
+			"instructions":    "Family travel itineraries. Use list_itineraries to discover ids, get_itinerary_detail for days/activities/checklist, add_itinerary to create one, and update_itinerary to edit supplied fields of an existing itinerary. Updates preserve omitted fields and replace supplied arrays in full. Give each activity place and the startLocation as an official map name or street address, so driving distances can be computed.",
 		}, nil
 	case "ping":
 		return schema{}, nil
@@ -442,6 +484,22 @@ func (a *API) callTool(r *http.Request, raw json.RawMessage) (any, *rpcError) {
 		return nil, &rpcError{rpcInvalidParams, "tool name is required"}
 	}
 	switch p.Name {
+	case "update_itinerary":
+		if !a.authorized(r) {
+			return toolError("unauthorized: update_itinerary requires 'Authorization: Bearer <API_TOKEN>'"), nil
+		}
+		var args struct {
+			ID      string                     `json:"id"`
+			Changes map[string]json.RawMessage `json:"changes"`
+		}
+		if err := decodeRaw(p.Arguments, &args); err != nil {
+			return nil, &rpcError{rpcInvalidParams, "invalid arguments: " + err.Error()}
+		}
+		it, err := a.updateItinerary(args.ID, args.Changes)
+		if err != nil {
+			return toolError(err.Error()), nil
+		}
+		return toolJSON(it), nil
 	case "list_itineraries":
 		return toolJSON(a.store.List()), nil
 	case "get_itinerary_detail":

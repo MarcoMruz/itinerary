@@ -187,7 +187,7 @@ func handleCORS(w http.ResponseWriter, r *http.Request, allowed []string) bool {
 		w.WriteHeader(http.StatusForbidden)
 		return true
 	}
-	h.Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+	h.Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 	h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version")
 	h.Set("Access-Control-Max-Age", "600")
 	w.WriteHeader(http.StatusNoContent)
