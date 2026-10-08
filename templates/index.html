@@ -81,26 +81,28 @@
                 <svg class="h-5 w-5 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 20l-5.4-2.7A1 1 0 013 16.4V5.6a1 1 0 011.4-.9L9 7m0 13l6-3m-6 3V7m6 10l4.6 2.3a1 1 0 001.4-.9V7.6a1 1 0 00-.6-.9L15 4m0 13V4m0 0L9 7"/></svg>
                 <span x-text="'Trasa dňa · ' + (day ? day.label : '')"></span>
               </h2>
-              <button type="button" x-show="dayRoute.stops.length" @click="openNav('Trasa dňa · ' + day.label, dayRoute.stops, start.trim())"
+              <button type="button" x-show="dayRoute.stops.length" @click="openNav('Trasa dňa · ' + day.label, dayRoute.stops, routeStart)"
                       class="inline-flex items-center gap-1.5 rounded-xl bg-amber-400 px-4 py-2 text-sm font-semibold text-emerald-950 shadow-sm hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-emerald-500">
                 Otvoriť trasu v Mapách ↗
               </button>
             </div>
             <label class="mt-3 block">
               <span class="text-xs font-semibold uppercase tracking-wide text-stone-500">Štart (voliteľný)</span>
-              <input type="text" :value="start" @input="start = $event.target.value; saveStart()" autocomplete="off"
+              <input type="text" :value="start" @input="start = $event.target.value; saveStart()" @change="routeStart = start.trim()" autocomplete="off"
                      placeholder="napr. hotel, v ktorom ste ubytovaní"
                      class="mt-1 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200">
             </label>
+            <p class="mt-1 text-xs text-stone-500" x-show="startMatch !== null"
+               x-text="startMatch ? 'Na mape: ' + startMatch : 'Štart sa na mape nenašiel, vzdialenosť od neho sa nezobrazí. Skúste presnejší názov alebo adresu.'"></p>
             <p class="mt-1 text-xs text-stone-400" x-show="!start.trim()">Bez štartu začne trasa vo vašej aktuálnej polohe. Platí pre všetky dni tohto itinerára.</p>
             <ol class="mt-3 flex flex-wrap items-center gap-x-1.5 gap-y-2 text-sm" x-show="dayRoute.stops.length">
-              <li x-show="start.trim()" class="inline-flex items-center gap-1.5 rounded-full bg-amber-50 py-1 pl-1 pr-3 ring-1 ring-amber-200">
+              <li x-show="routeStart" class="inline-flex items-center gap-1.5 rounded-full bg-amber-50 py-1 pl-1 pr-3 ring-1 ring-amber-200">
                 <span class="flex h-5 w-5 items-center justify-center rounded-full bg-amber-400 text-[11px] font-bold text-emerald-950">S</span>
-                <span x-text="start.trim()"></span>
+                <span x-text="routeStart"></span>
               </li>
               <template x-for="(s, k) in dayRoute.stops" :key="k">
                 <li class="inline-flex items-center gap-1.5">
-                  <span class="text-stone-300" x-show="k > 0 || start.trim()" aria-hidden="true">→</span>
+                  <span class="text-stone-300" x-show="k > 0 || routeStart" aria-hidden="true">→</span>
                   <span class="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 py-1 pl-1 pr-3 ring-1 ring-emerald-200">
                     <span class="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-700 text-[11px] font-bold text-white" x-text="k + 1"></span>
                     <span x-text="s"></span>
@@ -108,13 +110,18 @@
                 </li>
               </template>
             </ol>
+            <p class="mt-2 text-sm text-stone-500" x-show="legTotal" x-text="'Spolu autom: ' + fmtLeg(legTotal)"></p>
             <p class="mt-3 text-sm text-stone-500" x-show="!dayRoute.stops.length">Tento deň nemá žiadne body na mape.</p>
           </div>
 
           <ol class="relative mt-4 space-y-4 border-l-2 border-emerald-200 pl-6 sm:pl-8" x-show="day">
             <template x-for="(a, j) in (day ? day.activities : [])" :key="dayIndex + '-' + j">
               <li class="relative">
-                <span x-show="dayRoute.nums[j]" class="absolute -left-[37px] top-4 flex h-6 w-6 items-center justify-center rounded-full bg-emerald-700 text-xs font-bold text-white ring-4 ring-stone-50 sm:-left-[45px]" x-text="dayRoute.nums[j]"></span>
+                <p x-show="legBefore(j)" class="mb-2 flex items-center gap-1.5 text-xs font-medium text-stone-500">
+                  <svg class="h-4 w-4 text-stone-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M5 16h14M6.5 16l1.6-5.2A2 2 0 0110 9.4h4a2 2 0 011.9 1.4L17.5 16M5 16v3h2v-3m10 0v3h2v-3"/></svg>
+                  <span x-text="fmtLeg(legBefore(j))"></span>
+                </p>
+                <span x-show="dayRoute.nums[j]" :class="legBefore(j) ? 'top-10' : 'top-4'" class="absolute -left-[37px] flex h-6 w-6 items-center justify-center rounded-full bg-emerald-700 text-xs font-bold text-white ring-4 ring-stone-50 sm:-left-[45px]" x-text="dayRoute.nums[j]"></span>
                 <span x-show="!dayRoute.nums[j]" class="absolute -left-[33px] top-5 h-4 w-4 rounded-full border-4 border-stone-50 bg-emerald-300 sm:-left-[41px]" aria-hidden="true"></span>
                 <article class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-stone-200 transition hover:shadow-md sm:p-5">
                   <div class="flex flex-wrap items-center gap-2">
@@ -256,6 +263,20 @@ var mapLinks = {
   }
 };
 
+function fmtDistance(m) {
+  if (m < 1000) return Math.round(m) + ' m';
+  return (m < 10000 ? (m / 1000).toFixed(1).replace('.', ',') : Math.round(m / 1000)) + ' km';
+}
+
+function fmtDuration(s) {
+  var min = Math.max(1, Math.round(s / 60));
+  return min < 60 ? min + ' min' : Math.floor(min / 60) + ' h ' + String(min % 60).padStart(2, '0') + ' min';
+}
+
+function fmtLeg(leg) {
+  return leg ? fmtDistance(leg.meters) + ' · ' + fmtDuration(leg.seconds) : '';
+}
+
 function stopCount(n) {
   return n + (n === 1 ? ' zastávka' : n < 5 ? ' zastávky' : ' zastávok');
 }
@@ -263,6 +284,7 @@ function stopCount(n) {
 function itineraryApp() {
   var boot = JSON.parse(document.getElementById('boot').textContent) || {};
   var cache = new Map();
+  var legsInFlight = new Set();
   if (boot.active) cache.set(boot.active.id, boot.active);
 
   return {
@@ -276,12 +298,16 @@ function itineraryApp() {
     lastApp: (function () { try { return localStorage.getItem('nav_app') || ''; } catch (e) { return ''; } })(),
     loading: false,
     error: '',
+    routeStart: '', // start as last committed (blur/Enter); distances are measured from it, not from every keystroke
+    legsByKey: {}, // legsKey → day legs answer { legs, places, complete }
 
     init: function () {
       var self = this;
       this.loadChecked();
       this.loadStart();
       this.openFromHash();
+      this.$watch('legsKey', function () { self.loadLegs(0); });
+      this.loadLegs(0);
       window.addEventListener('hashchange', function () { self.openFromHash(); });
       // Pick up itineraries added by agents while the tab was in the background.
       document.addEventListener('visibilitychange', function () {
@@ -298,15 +324,82 @@ function itineraryApp() {
       return { done: done, total: items.length, pct: items.length ? Math.round(done * 100 / items.length) : 0 };
     },
 
-    // Route stops of one day: activities with a place, consecutive duplicates merged.
-    // nums[j] is the stop number of activity j (0 = not a stop).
+    // Route stops of one day: activities with a place, consecutive duplicates merged
+    // (same rule as Day.RouteStops on the server). nums[j] is the stop number of
+    // activity j (0 = not a stop); first[j] marks the activity that opens its stop.
     get dayRoute() {
-      var stops = [], nums = [];
+      var stops = [], nums = [], first = [];
       (this.day ? this.day.activities : []).forEach(function (a) {
-        if (a.place && a.place !== stops[stops.length - 1]) stops.push(a.place);
+        var isNew = !!a.place && a.place !== stops[stops.length - 1];
+        if (isNew) stops.push(a.place);
         nums.push(a.place ? stops.length : 0);
+        first.push(isNew);
       });
-      return { stops: stops, nums: nums };
+      return { stops: stops, nums: nums, first: first };
+    },
+
+    get legsKey() {
+      return this.current ? JSON.stringify([this.current.id, this.dayIndex, this.routeStart]) : '';
+    },
+
+    // legs[i] runs from point i to i+1 of [routeStart?, ...dayRoute.stops].
+    get legs() {
+      var entry = this.legsByKey[this.legsKey];
+      return entry ? entry.legs : [];
+    },
+
+    // What the start matched on the map: null until known, '' when not found.
+    get startMatch() {
+      var entry = this.legsByKey[this.legsKey];
+      if (!this.routeStart || !entry) return null;
+      return entry.places[0] || (entry.complete ? '' : null);
+    },
+
+    // Leg arriving at activity j, shown only on the activity that opens a stop.
+    legBefore: function (j) {
+      var route = this.dayRoute, k = route.nums[j];
+      if (!route.first[j]) return null;
+      var leg = this.legs[this.routeStart ? k - 1 : k - 2];
+      return leg && leg.meters > 0 ? leg : null;
+    },
+
+    get legTotal() {
+      var legs = this.legs;
+      if (!legs.length || legs.some(function (l) { return !l; })) return null;
+      return legs.reduce(function (sum, l) { return { meters: sum.meters + l.meters, seconds: sum.seconds + l.seconds }; }, { meters: 0, seconds: 0 });
+    },
+
+    // Fetches the current day's legs. An incomplete answer (upstream hiccup,
+    // deadline, 429) keeps what it has and retries a few times while still current.
+    // A key stays in legsInFlight for its whole fetch/retry chain, so revisiting a day never starts a second chain.
+    loadLegs: async function (attempt) {
+      var key = this.legsKey, known = this.legsByKey[key], self = this;
+      if (!key || this.dayRoute.stops.length + (this.routeStart ? 1 : 0) < 2 || (known && known.complete)) return;
+      if (attempt === 0 && legsInFlight.has(key)) return;
+      legsInFlight.add(key);
+      var retryIn = 0;
+      try {
+        var url = '/api/v1/itineraries/' + encodeURIComponent(this.current.id) + '/days/' + this.dayIndex + '/legs' +
+          (this.routeStart ? '?' + qs([['start', this.routeStart]]) : '');
+        var res = await fetch(url, { headers: { Accept: 'application/json' } });
+        if (res.ok) {
+          var body = await res.json();
+          this.legsByKey = Object.assign({}, this.legsByKey, { [key]: { legs: body.legs || [], places: body.places || [], complete: !!body.complete } });
+          if (!body.complete) retryIn = 3;
+        } else if (res.status === 429 || res.status >= 500) {
+          retryIn = Number(res.headers.get('Retry-After')) || 5;
+        }
+      } catch (e) {
+        retryIn = 5; // offline: the route shows without distances until a retry succeeds
+      }
+      if (!retryIn || attempt >= 4) {
+        legsInFlight.delete(key);
+        return;
+      }
+      setTimeout(function () {
+        if (self.legsKey === key) self.loadLegs(attempt + 1);
+        else legsInFlight.delete(key); // revisiting the day starts a fresh chain
+      }, retryIn * 1000);
     },
 
     get tripUrl() {
@@ -316,7 +409,7 @@ function itineraryApp() {
       this.current.days.forEach(function (d) {
         d.activities.forEach(function (a) { if (a.place && a.place !== stops[stops.length - 1]) stops.push(a.place); });
       });
-      return stops.length ? mapLinks.google(stops, this.start.trim()) : '';
+      return stops.length ? mapLinks.google(stops, this.routeStart) : '';
     },
 
     // Picker options. Google and Apple take the whole route; Waze links take a
@@ -397,6 +490,7 @@ function itineraryApp() {
       var saved = null;
       try { saved = localStorage.getItem('start_' + (this.current ? this.current.id : '')); } catch (e) { /* storage unavailable */ }
       this.start = saved !== null ? saved : ((this.current && this.current.startLocation) || '');
+      this.routeStart = this.start.trim();
     },
 
     saveStart: function () {

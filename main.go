@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -32,7 +33,8 @@ func main() {
 }
 
 func run() error {
-	store, err := OpenStore(env("DATA_FILE", "data/itineraries.json"), seedData)
+	dataFile := env("DATA_FILE", "data/itineraries.json")
+	store, err := OpenStore(dataFile, seedData)
 	if err != nil {
 		return err
 	}
@@ -41,6 +43,18 @@ func run() error {
 		token:     os.Getenv("API_TOKEN"),
 		readToken: os.Getenv("READ_API_TOKEN"),
 		publicURL: strings.TrimRight(os.Getenv("PUBLIC_URL"), "/"),
+	}
+	if env("DISTANCES", "true") != "false" {
+		// Nominatim's usage policy asks for an identifying User-Agent.
+		api.geo = NewGeo(filepath.Join(filepath.Dir(dataFile), "geo-cache.json"), strings.TrimSpace(appName+"/"+appVersion+" "+api.publicURL))
+		if n := envInt("START_LOOKUPS_PER_MINUTE", 20); n > 0 {
+			api.startLimiter = newRateLimiter(n, max(n/2, 1))
+			api.startGlobal = newRateLimiter(startLookupsGlobalPerMinute, startLookupsGlobalPerMinute/2)
+		}
+		api.ipHeader = os.Getenv("CLIENT_IP_HEADER")
+		if api.startLimiter != nil && api.ipHeader == "" {
+			log.Print("START_LOOKUPS_PER_MINUTE is keyed by peer IP; behind a proxy set CLIENT_IP_HEADER or all visitors share one budget")
+		}
 	}
 	sec := SecurityConfig{
 		CORSOrigins:    parseOrigins(os.Getenv("CORS_ORIGINS")),
@@ -66,6 +80,9 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if api.geo != nil {
+		go api.geo.RunWarmer(ctx)
+	}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
 	log.Printf("listening on %s (%d itineraries, write auth: %t)", srv.Addr, len(store.List()), api.token != "")
@@ -98,6 +115,7 @@ func newHandler(store *Store, api *API, sec SecurityConfig) (http.Handler, error
 	mux.HandleFunc("GET /api/v1/openapi.json", api.openAPI)
 	mux.HandleFunc("GET /api/v1/itineraries", api.requireUIRead(api.listItineraries))
 	mux.HandleFunc("GET /api/v1/itineraries/{id}", api.requireUIRead(api.getItinerary))
+	mux.HandleFunc("GET /api/v1/itineraries/{id}/days/{day}/legs", api.requireUIRead(api.getDayLegs))
 	mux.HandleFunc("POST /api/v1/itineraries", api.requireToken(api.createItinerary))
 	mux.HandleFunc("DELETE /api/v1/itineraries/{id}", api.requireToken(api.deleteItinerary))
 	mux.HandleFunc("POST /mcp", api.requireReadToken(api.mcp))

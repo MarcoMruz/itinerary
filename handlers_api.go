@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -10,9 +11,12 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -31,6 +35,12 @@ type API struct {
 	token     string // optional bearer token guarding writes
 	readToken string // optional bearer token guarding reads and MCP
 	publicURL string // optional absolute base URL for the OpenAPI document
+	geo       *Geo   // nil disables distances
+	// startLimiter caps uncached start lookups per client, so one visitor
+	// cannot occupy the shared, rate-limited geocoder.
+	startLimiter *rateLimiter
+	startGlobal  *rateLimiter // all clients together, so stops keep at least half of the ~55 calls/min
+	ipHeader     string
 }
 
 // ---------- Shared use cases ----------
@@ -45,6 +55,9 @@ func (a *API) addItinerary(it *Itinerary) error {
 	base := it.ID
 	for n := 2; ; n++ {
 		err := a.store.Create(it)
+		if err == nil && a.geo != nil {
+			go a.geo.Warm(it)
+		}
 		if !derived || !errors.Is(err, ErrExists) || n > maxIDSuffixTry {
 			return err
 		}
@@ -188,6 +201,50 @@ func (a *API) deleteItinerary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+const startLookupsGlobalPerMinute = 30
+
+const legsTimeout = 20 * time.Second // below the server WriteTimeout; unfinished legs come back null with complete=false
+
+// getDayLegs returns driving distances along one day route of a stored
+// itinerary, from the optional ?start= (e.g. the hotel) through its stops.
+// Stops come from the itinerary, so the only free text a visitor sends is the start.
+func (a *API) getDayLegs(w http.ResponseWriter, r *http.Request) {
+	if a.geo == nil {
+		writeError(w, http.StatusNotFound, "distances are disabled")
+		return
+	}
+	it, ok := a.store.Get(r.PathValue("id"))
+	day, err := strconv.Atoi(r.PathValue("day"))
+	if !ok || err != nil || day < 0 || day >= len(it.Days) {
+		writeError(w, http.StatusNotFound, "itinerary day not found")
+		return
+	}
+	start := r.URL.Query().Get("start")
+	if err := cleanText("start", &start); err != nil {
+		writeErr(w, err)
+		return
+	}
+	stops := it.Days[day].RouteStops()
+	if start != "" && len(stops) > 0 && a.startLimiter != nil {
+		// Charge every uncached call the start causes, so a known start cannot fan out across days.
+		ip := clientIP(r, a.ipHeader)
+		for range a.geo.StartCost(start, stops[0]) {
+			ok, wait := a.startLimiter.allow(ip, time.Now())
+			if ok && a.startGlobal != nil {
+				ok, wait = a.startGlobal.allow("*", time.Now())
+			}
+			if !ok {
+				w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
+				writeError(w, http.StatusTooManyRequests, "too many new start lookups, try again later")
+				return
+			}
+		}
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), legsTimeout)
+	defer cancel()
+	writeJSON(w, http.StatusOK, a.geo.Route(ctx, start, stops))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -358,7 +415,7 @@ func (a *API) dispatch(r *http.Request, req rpcRequest) (any, *rpcError) {
 			"protocolVersion": version,
 			"capabilities":    schema{"tools": schema{"listChanged": false}},
 			"serverInfo":      schema{"name": appName, "version": appVersion},
-			"instructions":    "Family travel itineraries. Use list_itineraries to discover ids, get_itinerary_detail for days/activities/checklist, add_itinerary to create one.",
+			"instructions":    "Family travel itineraries. Use list_itineraries to discover ids, get_itinerary_detail for days/activities/checklist, add_itinerary to create one. Give each activity place and the startLocation as an official map name or street address, so driving distances can be computed.",
 		}, nil
 	case "ping":
 		return schema{}, nil

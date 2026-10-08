@@ -23,6 +23,8 @@ docker build -t itinerary . && docker run -p 9876:9876 -v itinerary-data:/root/d
 | `RATE_LIMIT_BURST`      | `30`                    | Requests a client can make at once before the per-minute rate applies   |
 | `CLIENT_IP_HEADER`      | *(empty = peer IP)*     | Header holding the real client IP, e.g. `CF-Connecting-IP` behind Cloudflare |
 | `BLOCK_BOTS`            | `true`                  | `403` for empty user agents, AI/SEO crawlers and scanners (`false` to disable) |
+| `DISTANCES`             | `true`                  | Driving distance between route stops (`false` to disable; place names are then never sent to OpenStreetMap) |
+| `START_LOOKUPS_PER_MINUTE` | `20`                 | Uncached lookups (geocode, start→first stop) one client's start may cause per minute, burst half of it; all clients together are capped at 30/min so stops always get through (`0` disables both). Keyed by client IP, so set `CLIENT_IP_HEADER` behind a proxy |
 
 **Coolify:** use the Dockerfile build pack, port `9876`, add a persistent storage volume mounted at `/root/data`,
 and set `API_TOKEN` (otherwise anyone who can reach the app can read, add or delete itineraries).
@@ -52,6 +54,12 @@ Cloudflare setup:
 - MCP: `POST /mcp` (JSON-RPC 2.0, Streamable HTTP with JSON responses). Tools: `list_itineraries`, `get_itinerary_detail`, `add_itinerary`
 
 Routes: activities with a `place` become numbered stops of their day route; the optional itinerary `startLocation` (e.g. your hotel) is the origin of every day route and can be overridden in the UI (saved per itinerary in the browser). Without a start, Google Maps starts at the current location.
+
+Distances: `GET /api/v1/itineraries/{id}/days/{day}/legs?start=…` geocodes the day's stops with OpenStreetMap Nominatim and routes each leg with the public OSRM server
+(max 1 request/s, as both services require). Stops come from the stored itinerary, so the only free text a visitor sends is the start.
+Stop answers, including "not found", are cached in `geo-cache.json` next to `DATA_FILE`; starts are cached in memory only.
+New itineraries are looked up in the background when added, so the first visitor rarely waits. The UI shows the leg above each numbered stop, a day total, and what the start matched on the map.
+Stops need names OpenStreetMap knows: the API schema and MCP instructions ask agents for official map names or street addresses; a stop it cannot find simply shows no distance.
 
 ```sh
 claude mcp add --transport http itinerary https://your-host/mcp --header "Authorization: Bearer $API_TOKEN"

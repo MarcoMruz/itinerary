@@ -27,6 +27,18 @@ type Day struct {
 	Activities []Activity `json:"activities"`
 }
 
+// RouteStops lists the day's route: activity places with consecutive
+// duplicates merged. The UI numbers stops the same way (dayRoute).
+func (d Day) RouteStops() []string {
+	var stops []string
+	for _, a := range d.Activities {
+		if a.Place != "" && (len(stops) == 0 || stops[len(stops)-1] != a.Place) {
+			stops = append(stops, a.Place)
+		}
+	}
+	return stops
+}
+
 // Itinerary is the aggregate root. Once stored it is treated as immutable,
 // so the store can hand out pointers to concurrent readers safely.
 type Itinerary struct {
@@ -241,7 +253,7 @@ var activitySchema = schema{
 		"time":     strProp("Time window, e.g. '09:00 - 11:30' or '15:00+'"),
 		"title":    strProp("What happens"),
 		"location": strProp("Human readable place name"),
-		"place":    strProp("Geocodable Google Maps place/address. Activities with a place become numbered stops of the day route; mapsUrl is derived from it when omitted"),
+		"place":    strProp("Place the stop is at, findable on both Google Maps and OpenStreetMap: the official name as shown on the map (add the town only if the name alone is ambiguous, e.g. 'Stratenský kaňon, Stratená') or a street address. No descriptive extras like 'parking' or 'by the lake'; unknown names get no driving distance. Activities with a place become numbered stops of the day route; mapsUrl is derived from it when omitted"),
 		"mapsUrl":  strProp("Absolute http(s) Google Maps URL"),
 		"badge":    strProp("Short tag shown as a badge, e.g. 'Relax'"),
 	},
@@ -258,7 +270,7 @@ var itinerarySchema = schema{
 		"subtitle":       strProp("Short tagline"),
 		"duration":       strProp("Human readable length; derived from day count when omitted"),
 		"targetAudience": strProp("Who the trip is for, e.g. '2 adults + 1-year-old'"),
-		"startLocation":  strProp("Optional origin of every day route, e.g. the hotel you stay at; empty = traveller's current location"),
+		"startLocation":  strProp("Optional origin of every day route, e.g. the hotel you stay at, given as its official name or street address (same rules as activity place); empty = traveller's current location"),
 		"mapsUrl":        strProp("Absolute http(s) Google Maps route link for the whole trip"),
 		"days": schema{
 			"type": "array", "minItems": 1, "maxItems": maxDays,
