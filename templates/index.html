@@ -81,10 +81,10 @@
                 <svg class="h-5 w-5 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 20l-5.4-2.7A1 1 0 013 16.4V5.6a1 1 0 011.4-.9L9 7m0 13l6-3m-6 3V7m6 10l4.6 2.3a1 1 0 001.4-.9V7.6a1 1 0 00-.6-.9L15 4m0 13V4m0 0L9 7"/></svg>
                 <span x-text="'Trasa dňa · ' + (day ? day.label : '')"></span>
               </h2>
-              <a x-show="dayRoute.url" :href="dayRoute.url" target="_blank" rel="noopener noreferrer"
-                 class="inline-flex items-center gap-1.5 rounded-xl bg-amber-400 px-4 py-2 text-sm font-semibold text-emerald-950 shadow-sm hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+              <button type="button" x-show="dayRoute.stops.length" @click="openNav('Trasa dňa · ' + day.label, dayRoute.stops, start.trim())"
+                      class="inline-flex items-center gap-1.5 rounded-xl bg-amber-400 px-4 py-2 text-sm font-semibold text-emerald-950 shadow-sm hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-emerald-500">
                 Otvoriť trasu v Mapách ↗
-              </a>
+              </button>
             </div>
             <label class="mt-3 block">
               <span class="text-xs font-semibold uppercase tracking-wide text-stone-500">Štart (voliteľný)</span>
@@ -130,7 +130,11 @@
                       <svg class="h-4 w-4 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21s-7-6.1-7-11a7 7 0 1114 0c0 4.9-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
                       <span x-text="a.location"></span>
                     </p>
-                    <a x-show="a.mapsUrl" :href="a.mapsUrl" target="_blank" rel="noopener noreferrer"
+                    <button type="button" x-show="a.place" @click="openNav(a.title, [a.place], '')"
+                            class="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                      Navigovať ↗
+                    </button>
+                    <a x-show="!a.place && a.mapsUrl" :href="a.mapsUrl" target="_blank" rel="noopener noreferrer"
                        class="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500">
                       Navigovať ↗
                     </a>
@@ -171,6 +175,50 @@
     </template>
   </main>
 
+  <!-- Navigation app picker: bottom sheet on phones, centered modal on larger screens -->
+  <dialog x-ref="nav" @click="$event.target === $el && $el.close()" aria-labelledby="nav-title"
+          class="m-0 mt-auto w-full max-w-none rounded-t-3xl bg-white p-0 text-stone-800 shadow-2xl backdrop:bg-stone-900/50 sm:m-auto sm:max-w-md sm:rounded-3xl">
+    <div class="p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:p-6">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-wide text-emerald-700">Otvoriť v aplikácii</p>
+          <h2 id="nav-title" class="mt-0.5 text-lg font-bold text-stone-900" x-text="nav.title"></h2>
+        </div>
+        <button type="button" @click="$refs.nav.close()" aria-label="Zavrieť"
+                class="-mr-2 -mt-1 rounded-full p-2 text-stone-400 hover:bg-stone-100 hover:text-stone-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
+          <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <p class="mt-2 text-sm text-stone-500" x-text="[nav.origin || 'Aktuálna poloha'].concat(nav.stops).join(' → ')"></p>
+      <ul class="mt-4 space-y-2">
+        <template x-for="app in navApps" :key="app.id">
+          <li class="overflow-hidden rounded-2xl ring-1 transition"
+              :class="app.id === lastApp ? 'bg-emerald-50 ring-2 ring-emerald-500' : 'ring-stone-200 hover:bg-stone-50'">
+            <a :href="app.url" target="_blank" rel="noopener noreferrer" @click="pick(app.id)"
+               class="flex items-center gap-3 p-3 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-emerald-500">
+              <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-lg font-bold text-white" :class="app.color" x-text="app.letter" aria-hidden="true"></span>
+              <span class="min-w-0 flex-1">
+                <span class="flex items-center gap-2">
+                  <span class="font-semibold text-stone-900" x-text="app.name"></span>
+                  <span x-show="app.id === lastApp" class="rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">naposledy</span>
+                </span>
+                <span class="block text-xs text-stone-500" x-text="app.note"></span>
+              </span>
+              <span class="text-stone-400" aria-hidden="true">↗</span>
+            </a>
+            <div x-show="app.more.length" class="flex flex-wrap items-center gap-1.5 px-3 pb-3 pl-[68px] text-xs">
+              <span class="text-stone-400">ďalej:</span>
+              <template x-for="m in app.more" :key="m.url">
+                <a :href="m.url" target="_blank" rel="noopener noreferrer" @click="pick(app.id)" x-text="m.label"
+                   class="rounded-full bg-white px-2.5 py-1 font-semibold text-sky-700 ring-1 ring-sky-200 hover:bg-sky-50"></a>
+              </template>
+            </div>
+          </li>
+        </template>
+      </ul>
+    </div>
+  </dialog>
+
   <footer class="border-t border-stone-200 py-4 text-center text-xs text-stone-400">
     Agent ready: <a class="text-emerald-700 hover:underline" href="/api/v1/openapi.json">OpenAPI</a> ·
     <a class="text-emerald-700 hover:underline" href="/api/v1/itineraries">REST API</a> ·
@@ -179,6 +227,39 @@
 </div>
 
 <script>
+// Deep links per navigation app. Spaces are sent as %20 (what Apple and Waze
+// document) rather than URLSearchParams' '+'.
+function qs(pairs) {
+  return pairs.map(function (kv) { return encodeURIComponent(kv[0]) + '=' + encodeURIComponent(kv[1]); }).join('&');
+}
+
+var mapLinks = {
+  // https://developers.google.com/maps/documentation/urls/get-started#directions-action
+  google: function (stops, origin) {
+    var p = [['api', '1'], ['travelmode', 'driving']];
+    if (origin) p.push(['origin', origin]);
+    p.push(['destination', stops[stops.length - 1]]);
+    if (stops.length > 1) p.push(['waypoints', stops.slice(0, -1).join('|')]);
+    return 'https://www.google.com/maps/dir/?' + qs(p);
+  },
+  // Unified Maps URLs (iOS 18.4+, macOS 15.4+): repeated waypoint params for multistop.
+  apple: function (stops, origin) {
+    var p = [];
+    if (origin) p.push(['source', origin]);
+    stops.slice(0, -1).forEach(function (w) { p.push(['waypoint', w]); });
+    p.push(['destination', stops[stops.length - 1]], ['mode', 'driving']);
+    return 'https://maps.apple.com/directions?' + qs(p);
+  },
+  // https://developers.google.com/waze/deeplinks — one destination, always from the current location.
+  waze: function (place) {
+    return 'https://waze.com/ul?' + qs([['q', place], ['navigate', 'yes']]);
+  }
+};
+
+function stopCount(n) {
+  return n + (n === 1 ? ' zastávka' : n < 5 ? ' zastávky' : ' zastávok');
+}
+
 function itineraryApp() {
   var boot = JSON.parse(document.getElementById('boot').textContent) || {};
   var cache = new Map();
@@ -191,6 +272,8 @@ function itineraryApp() {
     dayIndex: 0,
     checked: [],
     start: '',
+    nav: { title: '', stops: [], origin: '' },
+    lastApp: (function () { try { return localStorage.getItem('nav_app') || ''; } catch (e) { return ''; } })(),
     loading: false,
     error: '',
 
@@ -223,7 +306,7 @@ function itineraryApp() {
         if (a.place && a.place !== stops[stops.length - 1]) stops.push(a.place);
         nums.push(a.place ? stops.length : 0);
       });
-      return { stops: stops, nums: nums, url: this.routeUrl(stops) };
+      return { stops: stops, nums: nums };
     },
 
     get tripUrl() {
@@ -233,18 +316,34 @@ function itineraryApp() {
       this.current.days.forEach(function (d) {
         d.activities.forEach(function (a) { if (a.place && a.place !== stops[stops.length - 1]) stops.push(a.place); });
       });
-      return this.routeUrl(stops);
+      return stops.length ? mapLinks.google(stops, this.start.trim()) : '';
     },
 
-    // Google Maps directions URL; without an origin Maps starts at the current location.
-    routeUrl: function (stops) {
-      if (!stops.length) return '';
-      var p = new URLSearchParams({ api: '1', travelmode: 'driving' });
-      var origin = this.start.trim();
-      if (origin) p.set('origin', origin);
-      p.set('destination', stops[stops.length - 1]);
-      if (stops.length > 1) p.set('waypoints', stops.slice(0, -1).join('|'));
-      return 'https://www.google.com/maps/dir/?' + p.toString();
+    // Picker options. Google and Apple take the whole route; Waze links take a
+    // single destination from the current location, so each stop gets its own link.
+    get navApps() {
+      var s = this.nav.stops, o = this.nav.origin;
+      if (!s.length) return [];
+      var whole = s.length > 1 ? 'Celá trasa · ' + stopCount(s.length) : 'Navigácia do cieľa';
+      var waze = s.map(function (p, i) { return { label: (s.length > 1 ? (i + 1) + ' · ' : '') + p, url: mapLinks.waze(p) }; });
+      return [
+        { id: 'google', name: 'Google Maps', letter: 'G', color: 'bg-blue-600', note: whole, url: mapLinks.google(s, o), more: [] },
+        { id: 'apple', name: 'Apple Maps', letter: 'A', color: 'bg-stone-900', note: whole, url: mapLinks.apple(s, o), more: [] },
+        { id: 'waze', name: 'Waze', letter: 'W', color: 'bg-sky-400',
+          note: '→ ' + waze[0].label + (s.length > 1 || o ? ' · Waze vie len 1 cieľ z aktuálnej polohy' : ''),
+          url: waze[0].url, more: waze.slice(1) }
+      ];
+    },
+
+    openNav: function (title, stops, origin) {
+      this.nav = { title: title, stops: stops.slice(), origin: origin || '' };
+      this.$refs.nav.showModal();
+    },
+
+    pick: function (app) {
+      this.lastApp = app;
+      try { localStorage.setItem('nav_app', app); } catch (e) { /* storage unavailable */ }
+      this.$refs.nav.close();
     },
 
     openFromHash: function () {
