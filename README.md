@@ -59,6 +59,20 @@ Only supplied fields change. Arrays replace in full; `checklist: []` clears the 
 IDs cannot change. Empty updates, null values, unknown fields and invalid itineraries are rejected.
 Updates require the write token, return the updated itinerary, and never create a missing itinerary.
 
+## Private checklist editing
+
+Use MCP `get_owner_link` with an itinerary `id`, or `POST /api/v1/itineraries/{id}/owner-link`
+with the write bearer token, to get its private edit link. Opening the link enables **Upraviť zoznam**:
+add, edit or remove items, then save or cancel. Checked items stay checked when renamed.
+The link grants checklist editing only; it does not identify a person or grant general API access.
+
+Keys are created on demand and saved in `owner-keys.json` beside `DATA_FILE` (owner-only file permissions).
+Keep this file private and include it in backups. Keys never appear in public itinerary responses.
+The URL fragment is exchanged for an HttpOnly, SameSite=Strict cookie lasting 30 days, then removed from the address bar.
+Keep the original link to regain access on another device. Anyone holding it can edit that checklist.
+To revoke access, remove the itinerary's key from `owner-keys.json`; existing cookies stop working too.
+Deleting an itinerary does not remove its key: remove the key as well before reusing an itinerary ID.
+
 Routes: activities with a `place` become numbered stops of their day route; the optional itinerary `startLocation` (e.g. your hotel) is the origin of every day route and can be overridden in the UI (saved per itinerary in the browser). Without a start, Google Maps starts at the current location.
 
 Distances: `GET /api/v1/itineraries/{id}/days/{day}/legs?start=…` geocodes the day's stops with OpenStreetMap Nominatim and routes each leg with the public OSRM server

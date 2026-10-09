@@ -162,8 +162,8 @@
             <div class="mt-3 h-2 overflow-hidden rounded-full bg-stone-100">
               <div class="h-full rounded-full bg-gradient-to-r from-emerald-500 to-amber-400 transition-all duration-300" :style="'width:' + progress.pct + '%'"></div>
             </div>
-            <ul class="mt-4 space-y-1">
-              <template x-for="item in current.checklist" :key="item">
+            <ul x-show="!editingChecklist" class="mt-4 space-y-1">
+              <template x-for="(item, index) in current.checklist" :key="index">
                 <li>
                   <label class="flex cursor-pointer items-start gap-3 rounded-lg p-2 hover:bg-stone-50">
                     <input type="checkbox" class="mt-0.5 h-5 w-5 shrink-0 rounded border-stone-300 accent-emerald-600"
@@ -174,6 +174,26 @@
               </template>
             </ul>
             <p x-show="!current.checklist.length" class="text-sm text-stone-500">Bez položiek.</p>
+            <button type="button" x-show="canEdit && !editingChecklist" @click="beginChecklistEdit()" class="mt-4 rounded-lg px-3 py-2 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200">Upraviť zoznam</button>
+            <form x-show="editingChecklist" @submit.prevent="saveChecklist()" class="mt-4 space-y-3">
+              <fieldset :disabled="savingChecklist" class="space-y-3">
+                <template x-for="(entry, index) in checklistDraft" :key="entry.id">
+                  <div class="flex items-start gap-2">
+                    <label class="min-w-0 flex-1">
+                      <span class="sr-only" x-text="'Položka ' + (index + 1)"></span>
+                      <textarea :value="entry.text" @input="changeChecklistItem(entry.id, $event.target.value)" required maxlength="500" rows="2" class="w-full rounded-lg border border-stone-300 p-2 text-sm focus:ring-2 focus:ring-emerald-500"></textarea>
+                    </label>
+                    <button type="button" @click="checklistDraft = checklistDraft.filter(e => e.id !== entry.id)" :aria-label="'Odstrániť položku ' + (index + 1)" class="rounded-lg py-2 text-xs text-red-700">Odstrániť</button>
+                  </div>
+                </template>
+                <button type="button" @click="addChecklistItem()" :disabled="checklistDraft.length >= 200" class="rounded-lg px-3 py-2 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200 disabled:opacity-50">Pridať položku</button>
+                <div class="flex flex-wrap gap-2">
+                  <button type="submit" class="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white" x-text="savingChecklist ? 'Ukladá sa…' : 'Uložiť zmeny'"></button>
+                  <button type="button" @click="editingChecklist = false; checklistMessage = ''" class="rounded-lg px-3 py-2 text-sm text-stone-600">Zrušiť</button>
+                </div>
+              </fieldset>
+            </form>
+            <p role="status" aria-live="polite" class="mt-3 text-sm" :class="checklistFailed ? 'text-red-700' : 'text-emerald-700'" x-text="checklistMessage"></p>
             <button type="button" x-show="checked.length" @click="checked = []; save()"
                     class="mt-3 text-xs font-semibold text-stone-400 hover:text-red-600">Zrušiť všetky označenia</button>
           </div>
@@ -293,6 +313,13 @@ function itineraryApp() {
     selectedId: boot.active ? boot.active.id : '',
     dayIndex: 0,
     checked: [],
+    canEdit: false,
+    editingChecklist: false,
+    savingChecklist: false,
+    checklistDraft: [],
+    checklistMessage: '',
+    checklistFailed: false,
+    draftSequence: 0,
     start: '',
     nav: { title: '', stops: [], origin: '' },
     lastApp: (function () { try { return localStorage.getItem('nav_app') || ''; } catch (e) { return ''; } })(),
@@ -306,9 +333,13 @@ function itineraryApp() {
       this.loadChecked();
       this.loadStart();
       this.openFromHash();
+      this.checkChecklistAccess();
       this.$watch('legsKey', function () { self.loadLegs(0); });
       this.loadLegs(0);
       window.addEventListener('hashchange', function () { self.openFromHash(); });
+      window.addEventListener('beforeunload', function (event) {
+        if (self.editingChecklist) { event.preventDefault(); event.returnValue = ''; }
+      });
       // Pick up itineraries added by agents while the tab was in the background.
       document.addEventListener('visibilitychange', function () {
         if (document.visibilityState === 'visible') self.refreshList();
@@ -440,12 +471,87 @@ function itineraryApp() {
     },
 
     openFromHash: function () {
-      var id = decodeURIComponent(location.hash.slice(1));
+      var parts = location.hash.slice(1).split('~');
+      var id = decodeURIComponent(parts[0]);
+      if (parts[1]) {
+        history.replaceState(null, '', '#' + encodeURIComponent(id));
+        this.activateOwner(id, parts[1]);
+      }
       if (id && id !== this.selectedId) this.select(id);
+    },
+
+    activateOwner: async function (id, key) {
+      try {
+        var res = await fetch('/api/v1/itineraries/' + encodeURIComponent(id) + '/owner-session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: key }) });
+        if (!res.ok) throw new Error('Odkaz na úpravu je neplatný.');
+        if (this.current && this.current.id === id) this.canEdit = true;
+      } catch (e) { this.error = e.message || 'Nepodarilo sa povoliť úpravy. Otvorte odkaz znova.'; }
+    },
+
+    checkChecklistAccess: async function () {
+      if (!this.current) return;
+      var id = this.current.id;
+      try {
+        var res = await fetch('/api/v1/itineraries/' + encodeURIComponent(id) + '/checklist-access');
+        if (!res.ok) return;
+        var access = await res.json();
+        if (this.current.id === id && access.canEdit) this.canEdit = true;
+      } catch (e) { /* read-only until access can be verified */ }
+    },
+
+    beginChecklistEdit: function () {
+      this.checklistDraft = this.current.checklist.map((text, index) => ({ id: index, text: text, original: text }));
+      this.draftSequence = this.checklistDraft.length;
+      this.checklistMessage = '';
+      this.editingChecklist = true;
+    },
+
+    changeChecklistItem: function (id, text) {
+      this.checklistDraft = this.checklistDraft.map(entry => entry.id === id ? Object.assign({}, entry, { text: text }) : entry);
+    },
+
+    addChecklistItem: function () {
+      this.checklistDraft = this.checklistDraft.concat({ id: this.draftSequence++, text: '', original: null });
+    },
+
+    saveChecklist: async function () {
+      if (this.savingChecklist) return;
+      var id = this.current.id;
+      var draft = this.checklistDraft;
+      this.checklistFailed = false;
+      this.checklistMessage = '';
+      if (draft.some(entry => !entry.text.trim())) {
+        this.checklistFailed = true;
+        this.checklistMessage = 'Vyplňte alebo odstráňte prázdne položky.';
+        return;
+      }
+      this.savingChecklist = true;
+      try {
+        var res = await fetch('/api/v1/itineraries/' + encodeURIComponent(id) + '/checklist', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ checklist: draft.map(entry => entry.text.trim()) }) });
+        if (!res.ok) throw new Error(res.status === 401 ? 'Otvorte súkromný odkaz na úpravu znova.' : 'Zmeny sa nepodarilo uložiť. Skúste znova.');
+        var updated = await res.json();
+        cache.set(id, updated);
+        if (this.current.id !== id) return;
+        this.checked = draft.filter(entry => entry.original !== null && this.checked.includes(entry.original)).map(entry => entry.text.trim());
+        this.current = updated;
+        this.save();
+        this.editingChecklist = false;
+        this.checklistMessage = 'Zmeny sú uložené.';
+      } catch (e) {
+        if (this.current.id === id) { this.checklistFailed = true; this.checklistMessage = e.message || 'Zmeny sa nepodarilo uložiť.'; }
+      } finally { this.savingChecklist = false; }
     },
 
     select: async function (id) {
       if (!id) return;
+      if (this.savingChecklist || (this.editingChecklist && !window.confirm('Zahodiť neuložené zmeny?'))) {
+        this.selectedId = this.current.id;
+        history.replaceState(null, '', '#' + encodeURIComponent(this.current.id));
+        return;
+      }
+      this.canEdit = false;
+      this.editingChecklist = false;
+      this.checklistMessage = '';
       this.selectedId = id;
       this.error = '';
       if (decodeURIComponent(location.hash.slice(1)) !== id) history.replaceState(null, '', '#' + encodeURIComponent(id));
@@ -466,6 +572,7 @@ function itineraryApp() {
         this.loading = false;
       }
       this.current = it;
+      this.checkChecklistAccess();
       this.dayIndex = 0;
       this.loadChecked();
       this.loadStart();

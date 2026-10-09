@@ -347,6 +347,11 @@ type mcpToolResult struct {
 
 var mcpTools = []mcpTool{
 	{
+		Name:        "get_owner_link",
+		Description: "Get or create the private checklist edit link for an itinerary. Anyone with this link can edit its checklist. Requires write access. Keep the link private.",
+		InputSchema: schema{"type": "object", "required": []string{"id"}, "additionalProperties": false, "properties": schema{"id": strProp("Existing itinerary id")}},
+	},
+	{
 		Name:        "update_itinerary",
 		Description: "Edit an existing itinerary. Omitted fields stay unchanged; supplied arrays replace existing arrays. Returns the updated itinerary. Requires write access.",
 		InputSchema: schema{"type": "object", "required": []string{"id", "changes"}, "additionalProperties": false, "properties": schema{

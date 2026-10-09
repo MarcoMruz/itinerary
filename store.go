@@ -205,6 +205,10 @@ func (s *Store) commit(apply func() (undo func(), err error)) error {
 }
 
 func writeAtomic(path string, data []byte) error {
+	return writeAtomicMode(path, data, 0o644)
+}
+
+func writeAtomicMode(path string, data []byte, mode os.FileMode) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".itineraries-*.tmp")
 	if err != nil {
 		return err
@@ -217,7 +221,7 @@ func writeAtomic(path string, data []byte) error {
 		err = cerr
 	}
 	if err == nil {
-		err = os.Chmod(tmp.Name(), 0o644)
+		err = os.Chmod(tmp.Name(), mode)
 	}
 	if err != nil {
 		return err

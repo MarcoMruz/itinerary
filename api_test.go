@@ -213,8 +213,8 @@ func TestMCP(t *testing.T) {
 		t.Fatalf("notification: want 202, got %d", code)
 	}
 	tools := rpc(t, mcp, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)["result"].(map[string]any)["tools"].([]any)
-	if len(tools) != 4 {
-		t.Fatalf("want 4 tools, got %d", len(tools))
+	if len(tools) != 5 {
+		t.Fatalf("want 5 tools, got %d", len(tools))
 	}
 
 	text := func(res map[string]any) (string, bool) {

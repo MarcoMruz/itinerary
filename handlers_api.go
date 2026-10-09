@@ -362,6 +362,12 @@ func (a *API) openAPI(w http.ResponseWriter, r *http.Request) {
 		"servers":    []schema{{"url": a.baseURL(r)}},
 		"components": components,
 		"paths": schema{
+			"/api/v1/itineraries/{id}/owner-link": schema{
+				"post": secured(schema{
+					"operationId": "getOwnerLink", "summary": "Get or create a private checklist edit link", "parameters": idParam,
+					"responses": schema{"200": resp("Private owner link; keep it secret", schema{"type": "object", "properties": schema{"url": strProp("Private edit URL")}}), "404": errResp("Not found")},
+				}),
+			},
 			"/api/v1/itineraries": schema{
 				"get": readSecured(schema{
 					"operationId": "listItineraries", "summary": "List all itineraries",
@@ -484,6 +490,21 @@ func (a *API) callTool(r *http.Request, raw json.RawMessage) (any, *rpcError) {
 		return nil, &rpcError{rpcInvalidParams, "tool name is required"}
 	}
 	switch p.Name {
+	case "get_owner_link":
+		if !a.authorized(r) {
+			return toolError("unauthorized: get_owner_link requires write access"), nil
+		}
+		var args struct {
+			ID string `json:"id"`
+		}
+		if err := decodeRaw(p.Arguments, &args); err != nil {
+			return nil, &rpcError{rpcInvalidParams, "invalid arguments: " + err.Error()}
+		}
+		key, err := a.store.ownerKey(args.ID, true)
+		if err != nil {
+			return toolError(err.Error()), nil
+		}
+		return toolJSON(schema{"url": a.baseURL(r) + "/#" + args.ID + "~" + key}), nil
 	case "update_itinerary":
 		if !a.authorized(r) {
 			return toolError("unauthorized: update_itinerary requires 'Authorization: Bearer <API_TOKEN>'"), nil
