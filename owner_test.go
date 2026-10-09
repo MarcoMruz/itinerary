@@ -26,6 +26,9 @@ func TestOwnerChecklistAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := strings.Split(link.URL, "~")[1]
+	if status, _ := do(t, "GET", base+"/checklist-share", ""); status != 401 {
+		t.Fatal("anonymous visitor retrieved share link")
+	}
 	if len(key) != 64 {
 		t.Fatal("unexpected key length")
 	}
@@ -57,6 +60,12 @@ func TestOwnerChecklistAccess(t *testing.T) {
 		t.Fatal("missing owner session")
 	}
 	cookie := res.Cookies()[0]
+	if status, body := do(t, "GET", base+"/checklist-share", "", "Cookie", cookie.String()); status != 200 || !strings.Contains(string(body), key) {
+		t.Fatalf("owner share link: %d %s", status, body)
+	}
+	if status, _ := do(t, "GET", srv.URL+"/api/v1/itineraries/other/checklist-share", "", "Cookie", cookie.String()); status != 401 {
+		t.Fatal("cross itinerary share link allowed")
+	}
 	if !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode {
 		t.Fatal("unsafe cookie")
 	}

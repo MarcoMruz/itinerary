@@ -89,6 +89,19 @@ func (a *API) checklistAccess(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, schema{"canEdit": a.hasOwnerSession(r)})
 }
 
+func (a *API) shareChecklist(w http.ResponseWriter, r *http.Request) {
+	if !a.hasOwnerSession(r) {
+		writeError(w, http.StatusUnauthorized, "owner link required")
+		return
+	}
+	key, err := a.store.ownerKey(r.PathValue("id"), false)
+	if err != nil || key == "" {
+		writeError(w, http.StatusUnauthorized, "owner link required")
+		return
+	}
+	writeJSON(w, http.StatusOK, schema{"url": a.baseURL(r) + "/#" + r.PathValue("id") + "~" + key})
+}
+
 func (a *API) editChecklist(w http.ResponseWriter, r *http.Request) {
 	if origin := r.Header.Get("Origin"); origin != "" {
 		parsed, err := url.Parse(origin)

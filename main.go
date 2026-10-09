@@ -123,6 +123,7 @@ func newHandler(store *Store, api *API, sec SecurityConfig) (http.Handler, error
 	mux.HandleFunc("POST /api/v1/itineraries/{id}/owner-link", api.requireToken(api.ownerLink))
 	mux.HandleFunc("POST /api/v1/itineraries/{id}/owner-session", api.ownerSession)
 	mux.HandleFunc("GET /api/v1/itineraries/{id}/checklist-access", api.checklistAccess)
+	mux.HandleFunc("GET /api/v1/itineraries/{id}/checklist-share", api.shareChecklist)
 	mux.HandleFunc("PATCH /api/v1/itineraries/{id}/checklist", api.editChecklist)
 
 	return protect(sec, mux), nil

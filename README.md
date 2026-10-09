@@ -64,6 +64,7 @@ Updates require the write token, return the updated itinerary, and never create 
 Use MCP `get_owner_link` with an itinerary `id`, or `POST /api/v1/itineraries/{id}/owner-link`
 with the write bearer token, to get its private edit link. Opening the link enables **Upraviť zoznam**:
 add, edit or remove items, then save or cancel. Checked items stay checked when renamed.
+Owners can use **Zdieľať zoznam** to copy the private edit link; a selectable field is available if clipboard access fails.
 The link grants checklist editing only; it does not identify a person or grant general API access.
 
 Keys are created on demand and saved in `owner-keys.json` beside `DATA_FILE` (owner-only file permissions).
