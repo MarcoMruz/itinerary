@@ -20,7 +20,7 @@ import (
 // Templates and seed data are compiled into the binary: the image needs no
 // extra files, and an empty mounted volume is initialised from the seed.
 var (
-	//go:embed templates/index.html
+	//go:embed templates/index.html templates/auth.html
 	templateFS embed.FS
 	//go:embed data/itineraries.json
 	seedData []byte
@@ -43,6 +43,23 @@ func run() error {
 		token:     os.Getenv("API_TOKEN"),
 		readToken: os.Getenv("READ_API_TOKEN"),
 		publicURL: strings.TrimRight(os.Getenv("PUBLIC_URL"), "/"),
+	}
+	if id := os.Getenv("GOOGLE_CLIENT_ID"); id != "" {
+		secret, err := loadAuthSecret(filepath.Dir(dataFile))
+		if err != nil {
+			return err
+		}
+		api.auth, err = NewAuth(AuthConfig{
+			GoogleClientID:     id,
+			GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
+			AllowedEmails:      parseList(os.Getenv("ALLOWED_EMAILS")),
+			RedirectHosts:      parseList(env("OAUTH_REDIRECT_HOSTS", "claude.ai,claude.com,localhost,127.0.0.1")),
+			PublicURL:          api.publicURL,
+			Secret:             secret,
+		})
+		if err != nil {
+			return err
+		}
 	}
 	if env("DISTANCES", "true") != "false" {
 		// Nominatim's usage policy asks for an identifying User-Agent.
@@ -85,7 +102,7 @@ func run() error {
 	}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
-	log.Printf("listening on %s (%d itineraries, write auth: %t)", srv.Addr, len(store.List()), api.token != "")
+	log.Printf("listening on %s (%d itineraries, write auth: %t, google sign-in: %t)", srv.Addr, len(store.List()), api.token != "", api.auth != nil)
 
 	select {
 	case err := <-errc:
@@ -125,6 +142,9 @@ func newHandler(store *Store, api *API, sec SecurityConfig) (http.Handler, error
 	mux.HandleFunc("GET /api/v1/itineraries/{id}/checklist-access", api.checklistAccess)
 	mux.HandleFunc("GET /api/v1/itineraries/{id}/checklist-share", api.shareChecklist)
 	mux.HandleFunc("PATCH /api/v1/itineraries/{id}/checklist", api.editChecklist)
+	if api.auth != nil {
+		api.auth.routes(mux)
+	}
 
 	return protect(sec, mux), nil
 }
@@ -135,9 +155,18 @@ func indexHandler(store *Store, api *API, tmpl *template.Template) http.HandlerF
 	type bootData struct {
 		List   []Summary  `json:"list"`
 		Active *Itinerary `json:"active"`
+		User   string     `json:"-"` // signed-in Google account, shown in the footer
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		data := bootData{List: store.List()}
+		var user string
+		if api.auth != nil {
+			// Signed out, nothing private is rendered: crawlers and strangers get the login page.
+			if user = api.auth.sessionEmail(r); user == "" {
+				api.auth.renderLogin(w)
+				return
+			}
+		}
+		data := bootData{List: store.List(), User: user}
 		if len(data.List) > 0 {
 			data.Active, _ = store.Get(data.List[0].ID)
 		}
@@ -159,6 +188,16 @@ func env(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func parseList(s string) []string {
+	var out []string
+	for _, v := range strings.Split(s, ",") {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func envInt(key string, fallback int) int {
