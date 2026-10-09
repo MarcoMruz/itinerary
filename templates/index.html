@@ -8,6 +8,10 @@
   <script src="https://cdn.tailwindcss.com/3.4.16"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
   <style>[x-cloak]{display:none!important}</style>
+  <script id="restore-hash">
+    // A private checklist link opened while signed out comes back from Google sign-in without its #fragment.
+    try { var h = sessionStorage.getItem('itinerary_hash'); sessionStorage.removeItem('itinerary_hash'); if (h && !location.hash) history.replaceState(null, '', h); } catch (e) {}
+  </script>
 </head>
 <body class="min-h-screen bg-stone-50 text-stone-800 antialiased">
 <script id="boot" type="application/json">{{.}}</script>
@@ -258,6 +262,7 @@
     Agent ready: <a class="text-emerald-700 hover:underline" href="/api/v1/openapi.json">OpenAPI</a> ·
     <a class="text-emerald-700 hover:underline" href="/api/v1/itineraries">REST API</a> ·
     MCP <code>POST /mcp</code>
+    {{if .User}}<form method="post" action="/auth/logout" class="mt-2">{{.User}} · <button class="text-emerald-700 hover:underline">Odhlásiť sa</button></form>{{end}}
   </footer>
 </div>
 

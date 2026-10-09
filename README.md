@@ -23,6 +23,11 @@ docker build -t itinerary . && docker run -p 9876:9876 -v itinerary-data:/root/d
 | `RATE_LIMIT_BURST`      | `30`                    | Requests a client can make at once before the per-minute rate applies   |
 | `CLIENT_IP_HEADER`      | *(empty = peer IP)*     | Header holding the real client IP, e.g. `CF-Connecting-IP` behind Cloudflare |
 | `BLOCK_BOTS`            | `true`                  | `403` for empty user agents, AI/SEO crawlers and scanners (`false` to disable) |
+| `GOOGLE_CLIENT_ID`      | *(empty = off)*         | Turns on Google sign-in for the page and OAuth for MCP connectors (see below) |
+| `GOOGLE_CLIENT_SECRET`  | *(empty)*               | Google OAuth client secret (required with `GOOGLE_CLIENT_ID`)           |
+| `ALLOWED_EMAILS`        | *(empty)*               | Comma-separated Google accounts allowed in (required with `GOOGLE_CLIENT_ID`) |
+| `OAUTH_REDIRECT_HOSTS`  | `claude.ai,claude.com,localhost,127.0.0.1` | Hosts MCP clients may register OAuth redirect URIs on (https; http only on loopback) |
+| `AUTH_SECRET`           | *(generated)*           | Key signing sessions and tokens (32+ chars); by default a random key is saved in `auth-secret.key` beside `DATA_FILE` |
 | `DISTANCES`             | `true`                  | Driving distance between route stops (`false` to disable; place names are then never sent to OpenStreetMap) |
 | `START_LOOKUPS_PER_MINUTE` | `20`                 | Uncached lookups (geocode, start→first stop) one client's start may cause per minute, burst half of it; all clients together are capped at 30/min so stops always get through (`0` disables both). Keyed by client IP, so set `CLIENT_IP_HEADER` behind a proxy |
 
@@ -33,7 +38,7 @@ and set `API_TOKEN` (otherwise anyone who can reach the app can read, add or del
 
 - **Access:** once a token is set, `/api/v1/itineraries*` and `/mcp` need `Authorization: Bearer <token>`.
   The web page sets an `HttpOnly`, `SameSite=Strict` read-only cookie so the UI keeps working; it cannot write.
-  The page itself stays public, so put Cloudflare Access in front of `/` if the content must be private.
+  The page itself stays public unless Google sign-in is on (see below).
   `openapi.json`, `robots.txt` and `/healthz` stay public.
 - **Cache-Control (Cloudflare):** API, MCP and error responses are `no-store`; the page is `private, no-cache`
   (it sets the cookie); `openapi.json` is `public, max-age=300`; `robots.txt` is `public, max-age=86400`.
@@ -46,6 +51,29 @@ Cloudflare setup:
 - Turn on Bot Fight Mode and "Block AI bots" (Security → Bots).
 - Add a WAF rate-limiting rule on `/api/` and `/mcp` as a first line in front of the app limit.
 - Leave the default cache level; nothing here needs a Cache Rule.
+
+## Google sign-in and MCP connectors
+
+With `GOOGLE_CLIENT_ID` set, the page shows only a Google sign-in until someone from `ALLOWED_EMAILS` logs in,
+so crawlers and strangers see no itinerary content. The same sign-in lets MCP clients connect over OAuth,
+e.g. a claude.ai custom connector that then also works in the Claude mobile and desktop apps.
+
+1. Google Cloud Console → APIs & Services → Credentials → Create OAuth client ID → *Web application*.
+   Authorized redirect URI: `https://<your-host>/auth/google/callback`. (OAuth consent screen: scopes `openid` and `email`.)
+2. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `ALLOWED_EMAILS` and `PUBLIC_URL=https://<your-host>`; redeploy.
+3. claude.ai → Settings → Connectors → *Add custom connector* → URL `https://<your-host>/mcp`, no client id/secret.
+   Sign in with Google, then click **Povoliť** on the consent page.
+
+How it works: the app is its own OAuth 2.1 authorization server (metadata at `/.well-known/oauth-authorization-server`
+and `/.well-known/oauth-protected-resource/mcp`, dynamic client registration, PKCE S256 required) and uses Google only
+to learn who signs in. Every allowed account gets full read/write access through MCP; the web session stays read-only.
+Access tokens last 1 hour, refresh tokens 60 days, web sessions 30 days. Client ids, codes and tokens are signed with
+`AUTH_SECRET` rather than stored. Removing an email from `ALLOWED_EMAILS` revokes that person at once;
+changing `AUTH_SECRET` (or deleting `auth-secret.key`) signs everyone out and disconnects every connector.
+`API_TOKEN` and `READ_API_TOKEN` keep working for scripts and Claude Code.
+
+If Cloudflare "Block AI bots" or Bot Fight Mode is on, make sure it does not block `/mcp`, `/oauth/*` and `/.well-known/*`,
+or the claude.ai connector cannot reach the app.
 
 ## Agent interfaces
 
