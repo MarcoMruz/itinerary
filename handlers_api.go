@@ -57,7 +57,7 @@ func (a *API) addItinerary(it *Itinerary) error {
 	for n := 2; ; n++ {
 		err := a.store.Create(it)
 		if err == nil && a.geo != nil {
-			go a.geo.Warm(it)
+			a.geo.Warm(it)
 		}
 		if !derived || !errors.Is(err, ErrExists) || n > maxIDSuffixTry {
 			return err
@@ -67,18 +67,9 @@ func (a *API) addItinerary(it *Itinerary) error {
 }
 
 func decodeItinerary(r io.Reader) (*Itinerary, error) {
-	dec := json.NewDecoder(r)
-	dec.DisallowUnknownFields() // surface agent typos ("name" vs "title") instead of dropping data
 	var it Itinerary
-	if err := dec.Decode(&it); err != nil {
-		var tooBig *http.MaxBytesError
-		if errors.As(err, &tooBig) {
-			return nil, err
-		}
-		return nil, invalid("invalid JSON: %v", err)
-	}
-	if err := requireJSONEOF(dec); err != nil {
-		return nil, invalid("invalid JSON: %v", err)
+	if err := decodeJSON(r, &it); err != nil {
+		return nil, err
 	}
 	return &it, nil
 }
@@ -90,7 +81,7 @@ func (a *API) updateItinerary(id string, changes map[string]json.RawMessage) (*I
 	it, err := a.store.Update(id, changes)
 	if err == nil && a.geo != nil {
 		if _, changed := changes["days"]; changed {
-			go a.geo.Warm(it)
+			a.geo.Warm(it)
 		}
 	}
 	return it, err
@@ -234,16 +225,7 @@ func (a *API) deleteItinerary(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) patchItinerary(w http.ResponseWriter, r *http.Request) {
 	var changes map[string]json.RawMessage
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
-	err := dec.Decode(&changes)
-	if err == nil {
-		err = requireJSONEOF(dec)
-	}
-	if err != nil {
-		var tooBig *http.MaxBytesError
-		if !errors.As(err, &tooBig) {
-			err = invalid("invalid JSON: %v", err)
-		}
+	if err := decodeJSON(http.MaxBytesReader(w, r.Body, maxBodyBytes), &changes); err != nil {
 		writeErr(w, err)
 		return
 	}
@@ -348,7 +330,7 @@ func (a *API) openAPI(w http.ResponseWriter, r *http.Request) {
 		op["responses"].(schema)["401"] = errResp("Unauthorized")
 		return op
 	}
-	secured, readSecured := func(op schema) schema { return op }, func(op schema) schema { return op }
+	secured := func(op schema) schema { return op }
 	components := schema{
 		"schemas": schema{
 			"Summary": schema{"type": "object", "properties": schema{
@@ -362,9 +344,6 @@ func (a *API) openAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.readsProtected() {
 		components["securitySchemes"] = schema{"bearerAuth": schema{"type": "http", "scheme": "bearer"}}
-		readSecured = withBearer
-	}
-	if a.readsProtected() {
 		secured = withBearer
 	}
 
@@ -385,7 +364,7 @@ func (a *API) openAPI(w http.ResponseWriter, r *http.Request) {
 				}),
 			},
 			"/api/v1/itineraries": schema{
-				"get": readSecured(schema{
+				"get": secured(schema{
 					"operationId": "listItineraries", "summary": "List all itineraries",
 					"responses": schema{"200": resp("Itinerary summaries", schema{"type": "array", "items": ref("Summary")})},
 				}),
@@ -404,7 +383,7 @@ func (a *API) openAPI(w http.ResponseWriter, r *http.Request) {
 					"requestBody": schema{"required": true, "content": jsonBody(ref("ItineraryUpdate"))},
 					"responses":   schema{"200": resp("Updated itinerary", ref("Itinerary")), "400": errResp("Validation error"), "404": errResp("Not found"), "413": errResp("Request body too large")},
 				}),
-				"get": readSecured(schema{
+				"get": secured(schema{
 					"operationId": "getItinerary", "summary": "Get itinerary detail incl. days and checklist", "parameters": idParam,
 					"responses": schema{"200": resp("Itinerary", ref("Itinerary")), "404": errResp("Not found")},
 				}),
@@ -597,12 +576,24 @@ func decodeRaw(raw json.RawMessage, dst any) error {
 	if len(raw) == 0 {
 		return errors.New("object is required")
 	}
-	dec := json.NewDecoder(bytes.NewReader(raw))
+	return decodeJSON(bytes.NewReader(raw), dst)
+}
+
+func decodeJSON(r io.Reader, dst any) error {
+	dec := json.NewDecoder(r)
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(dst); err != nil {
+	err := dec.Decode(dst)
+	if err == nil {
+		err = requireJSONEOF(dec)
+	}
+	if err != nil {
+		var tooBig *http.MaxBytesError
+		if !errors.As(err, &tooBig) {
+			return invalid("invalid JSON: %v", err)
+		}
 		return err
 	}
-	return requireJSONEOF(dec)
+	return nil
 }
 
 func toolJSON(v any) mcpToolResult {

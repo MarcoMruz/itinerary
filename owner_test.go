@@ -26,6 +26,11 @@ func TestOwnerChecklistAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := strings.Split(link.URL, "~")[1]
+	for _, body := range []string{`{"key":"` + key + `"} {}`, `{"key":"` + key + `","typo":true}`} {
+		if status, _ := do(t, "POST", base+"/owner-session", body); status != 400 {
+			t.Errorf("invalid owner session body accepted: %d", status)
+		}
+	}
 	if status, _ := do(t, "GET", base+"/checklist-share", ""); status != 401 {
 		t.Fatal("anonymous visitor retrieved share link")
 	}
@@ -77,6 +82,7 @@ func TestOwnerChecklistAccess(t *testing.T) {
 		{"PATCH", "/checklist", `{"checklist":["Water"]}`, 200},
 		{"PATCH", "/checklist", `{"checklist":[]}`, 200},
 		{"PATCH", "/checklist", `{"checklist":null}`, 400},
+		{"PATCH", "/checklist", `{"checklist":[]}` + strings.Repeat(" ", maxBodyBytes), 413},
 		{"PATCH", "/checklist", `{"checklist":[],"title":"changed"}`, 400},
 		{"PATCH", "", `{"title":"changed"}`, 401},
 	} {

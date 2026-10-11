@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -16,8 +18,7 @@ var (
 )
 
 // Store is an in-memory registry persisted to a JSON file on every write.
-// Reads never touch the disk; writes are serialised and written atomically
-// (temp file + rename), and rolled back in memory if the write fails.
+// Writes publish a new snapshot only after its atomic file write succeeds.
 type Store struct {
 	path  string
 	wmu   sync.Mutex   // serialises mutations so the file never goes back in time
@@ -60,7 +61,7 @@ func OpenStore(path string, seed []byte) (*Store, error) {
 		s.order = append(s.order, it.ID)
 	}
 	if fresh {
-		if err := s.commit(func() (func(), error) { return func() {}, nil }); err != nil {
+		if err := s.persist(s.items, s.order); err != nil {
 			return nil, fmt.Errorf("write %s: %w", path, err)
 		}
 	}
@@ -78,7 +79,7 @@ func (s *Store) List() []Summary {
 	return out
 }
 
-// Get returns the stored itinerary. Callers must not mutate it.
+// Get returns an independent copy of the stored itinerary.
 func (s *Store) Get(id string) (*Itinerary, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -86,71 +87,59 @@ func (s *Store) Get(id string) (*Itinerary, bool) {
 	if !ok {
 		return nil, false
 	}
-	copy, err := cloneItinerary(it)
-	return copy, err == nil
+	return cloneItinerary(it), true
 }
 
 // Create stores a normalized itinerary. It returns ErrExists on id collision.
 func (s *Store) Create(it *Itinerary) error {
-	copy, err := cloneItinerary(it)
-	if err != nil {
-		return err
-	}
-	return s.commit(func() (func(), error) {
-		if _, ok := s.items[copy.ID]; ok {
+	copy := cloneItinerary(it)
+	return s.commit(func(items map[string]*Itinerary, order []string) ([]string, error) {
+		if _, ok := items[copy.ID]; ok {
 			return nil, ErrExists
 		}
-		prev := s.order
-		s.items[copy.ID] = copy
-		s.order = append(slices.Clip(s.order), copy.ID)
-		return func() { delete(s.items, copy.ID); s.order = prev }, nil
+		items[copy.ID] = copy
+		return append(order, copy.ID), nil
 	})
 }
 
 func (s *Store) Update(id string, changes map[string]json.RawMessage) (*Itinerary, error) {
 	var updated *Itinerary
-	err := s.commit(func() (func(), error) {
-		previous, ok := s.items[id]
+	err := s.commit(func(items map[string]*Itinerary, order []string) ([]string, error) {
+		previous, ok := items[id]
 		if !ok {
 			return nil, ErrNotFound
 		}
 		if len(changes) == 0 {
 			return nil, invalid("changes must contain at least one field")
 		}
-		data, err := json.Marshal(previous)
-		if err != nil {
-			return nil, err
-		}
-		var fields map[string]json.RawMessage
-		if err := json.Unmarshal(data, &fields); err != nil {
-			return nil, err
-		}
 		for key, value := range changes {
 			if _, ok := itineraryUpdateSchema["properties"].(schema)[key]; !ok {
 				return nil, invalid("unknown or immutable field %q", key)
 			}
-			if string(value) == "null" {
+			if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
 				return nil, invalid("%s must not be null", key)
 			}
-			fields[key] = value
 		}
-		data, err = json.Marshal(fields)
+		data, err := json.Marshal(changes)
 		if err != nil {
 			return nil, err
 		}
-		var next Itinerary
-		if err := decodeRaw(data, &next); err != nil {
+		next := cloneItinerary(previous)
+		if _, changed := changes["days"]; changed {
+			next.Days = nil // JSON decoding reuses slice elements; replacement must start empty.
+		}
+		if _, changed := changes["checklist"]; changed {
+			next.Checklist = nil
+		}
+		if err := decodeRaw(data, next); err != nil {
 			return nil, invalid("invalid changes: %v", err)
 		}
 		if err := next.Normalize(); err != nil {
 			return nil, err
 		}
-		updated, err = cloneItinerary(&next)
-		if err != nil {
-			return nil, err
-		}
-		s.items[id] = &next
-		return func() { s.items[id] = previous }, nil
+		updated = cloneItinerary(next)
+		items[id] = next
+		return order, nil
 	})
 	if err != nil {
 		return nil, err
@@ -160,64 +149,59 @@ func (s *Store) Update(id string, changes map[string]json.RawMessage) (*Itinerar
 
 // Replace swaps an existing itinerary for a normalized one with the same id.
 func (s *Store) Replace(it *Itinerary) error {
-	copy, err := cloneItinerary(it)
-	if err != nil {
-		return err
-	}
-	return s.commit(func() (func(), error) {
-		previous, ok := s.items[copy.ID]
-		if !ok {
+	copy := cloneItinerary(it)
+	return s.commit(func(items map[string]*Itinerary, order []string) ([]string, error) {
+		if _, ok := items[copy.ID]; !ok {
 			return nil, ErrNotFound
 		}
-		s.items[copy.ID] = copy
-		return func() { s.items[copy.ID] = previous }, nil
+		items[copy.ID] = copy
+		return order, nil
 	})
 }
 
 // Delete removes an itinerary. It returns ErrNotFound for unknown ids.
 func (s *Store) Delete(id string) error {
-	return s.commit(func() (func(), error) {
-		it, ok := s.items[id]
-		if !ok {
+	return s.commit(func(items map[string]*Itinerary, order []string) ([]string, error) {
+		if _, ok := items[id]; !ok {
 			return nil, ErrNotFound
 		}
-		prev := s.order
-		i := slices.Index(prev, id)
-		s.order = slices.Delete(slices.Clone(prev), i, i+1)
-		delete(s.items, id)
-		return func() { s.items[id] = it; s.order = prev }, nil
+		delete(items, id)
+		i := slices.Index(order, id)
+		return slices.Delete(order, i, i+1), nil
 	})
 }
 
-// commit applies a mutation under the locks, persists the resulting snapshot
-// and undoes the mutation if persisting fails, keeping memory and disk equal.
-// Readers are only blocked while the snapshot is marshalled, not during I/O.
-func (s *Store) commit(apply func() (undo func(), err error)) error {
+// Stored itineraries are immutable; only the map and order need copying.
+func (s *Store) commit(apply func(map[string]*Itinerary, []string) ([]string, error)) error {
 	s.wmu.Lock()
 	defer s.wmu.Unlock()
 
-	s.mu.Lock()
-	undo, err := apply()
+	s.mu.RLock()
+	items, order := maps.Clone(s.items), slices.Clone(s.order)
+	s.mu.RUnlock()
+	order, err := apply(items, order)
 	if err != nil {
-		s.mu.Unlock()
 		return err
 	}
-	snapshot := make([]*Itinerary, len(s.order))
-	for i, id := range s.order {
-		snapshot[i] = s.items[id]
+	if err := s.persist(items, order); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.items, s.order = items, order
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *Store) persist(items map[string]*Itinerary, order []string) error {
+	snapshot := make([]*Itinerary, len(order))
+	for i, id := range order {
+		snapshot[i] = items[id]
 	}
 	data, err := json.MarshalIndent(snapshot, "", "  ")
-	s.mu.Unlock()
-
-	if err == nil {
-		err = writeAtomic(s.path, append(data, '\n'))
-	}
 	if err != nil {
-		s.mu.Lock()
-		undo()
-		s.mu.Unlock()
+		return err
 	}
-	return err
+	return writeAtomic(s.path, append(data, '\n'))
 }
 
 func writeAtomic(path string, data []byte) error {
@@ -245,14 +229,12 @@ func writeAtomicMode(path string, data []byte, mode os.FileMode) error {
 	return os.Rename(tmp.Name(), path)
 }
 
-func cloneItinerary(it *Itinerary) (*Itinerary, error) {
-	data, err := json.Marshal(it)
-	if err != nil {
-		return nil, err
+func cloneItinerary(it *Itinerary) *Itinerary {
+	copy := *it
+	copy.Checklist = slices.Clone(it.Checklist)
+	copy.Days = slices.Clone(it.Days)
+	for i := range copy.Days {
+		copy.Days[i].Activities = slices.Clone(it.Days[i].Activities)
 	}
-	var copy Itinerary
-	if err := json.Unmarshal(data, &copy); err != nil {
-		return nil, err
-	}
-	return &copy, nil
+	return &copy
 }

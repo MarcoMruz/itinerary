@@ -8,6 +8,7 @@ function setup(fetch, navigator = {}) {
   const context = vm.createContext({
     document: { getElementById: () => ({ textContent: JSON.stringify({ active: current }) }) },
     localStorage: { getItem: () => null, setItem() {} }, fetch, navigator, window: { confirm: () => true },
+    location: { hash: '#trip' }, history: { replaceState() {} },
   });
   const html = fs.readFileSync('templates/index.html', 'utf8');
   vm.runInContext(html.split('<script>')[1].split('</script>')[0], context);
@@ -30,6 +31,42 @@ test('add, rename and remove save while preserving checked state', async () => {
   assert.deepEqual(sent.checklist, ['Fresh water', 'Socks']);
   assert.equal(JSON.stringify(app.checked), '["Fresh water"]');
   assert.equal(app.editingChecklist, false);
+});
+
+test('reselecting an itinerary fetches edits made by another owner', async () => {
+  const app = setup(async url => ({
+    ok: true,
+    json: async () => url.endsWith('/checklist-access')
+      ? { canEdit: false }
+      : { id: 'trip', days: [], checklist: ['Updated elsewhere'] },
+  }));
+  await app.select('trip');
+  assert.equal(app.current.checklist[0], 'Updated elsewhere');
+});
+
+test('switching back while another itinerary loads clears loading state', async () => {
+  let finish;
+  const app = setup(url => {
+    if (url.endsWith('/other')) return new Promise(resolve => { finish = resolve; });
+    return Promise.resolve({ ok: true, json: async () => url.endsWith('/checklist-access')
+      ? { canEdit: false } : { id: 'trip', days: [], checklist: ['Water'] } });
+  });
+  const pending = app.select('other');
+  await app.select('trip');
+  finish({ ok: true, json: async () => ({ id: 'other', days: [], checklist: [] }) });
+  await pending;
+  assert.equal(app.current.id, 'trip');
+  assert.equal(app.loading, false);
+});
+
+test('changed route stops invalidate distances for the same itinerary and day', () => {
+  const app = setup(async () => ({}));
+  app.current = { ...app.current, days: [{ activities: [{ place: 'Lake' }, { place: 'Castle' }] }] };
+  const oldKey = app.legsKey;
+  app.legsByKey = { [oldKey]: { legs: [{ meters: 1000, seconds: 60 }], complete: true } };
+  app.current = { ...app.current, days: [{ activities: [{ place: 'Lake' }, { place: 'Town' }] }] };
+  assert.notEqual(app.legsKey, oldKey);
+  assert.equal(app.legs.length, 0);
 });
 
 test('owner share copies the link with a manual fallback', async () => {

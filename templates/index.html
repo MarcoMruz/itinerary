@@ -529,9 +529,7 @@ function stopCount(n) {
 
 function itineraryApp() {
   var boot = JSON.parse(document.getElementById('boot').textContent) || {};
-  var cache = new Map();
   var legsInFlight = new Set();
-  if (boot.active) cache.set(boot.active.id, boot.active);
 
   return {
     list: boot.list || [],
@@ -605,7 +603,7 @@ function itineraryApp() {
     },
 
     get legsKey() {
-      return this.current ? JSON.stringify([this.current.id, this.dayIndex, this.routeStart]) : '';
+      return this.current ? JSON.stringify([this.current.id, this.dayIndex, this.routeStart, this.dayRoute.stops]) : '';
     },
 
     // legs[i] runs from point i to i+1 of [routeStart?, ...dayRoute.stops].
@@ -788,7 +786,6 @@ function itineraryApp() {
         var res = await fetch('/api/v1/itineraries/' + encodeURIComponent(id) + '/checklist', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ checklist: draft.map(entry => entry.text.trim()) }) });
         if (!res.ok) throw new Error(res.status === 401 ? 'Otvorte súkromný odkaz na úpravu znova.' : 'Zmeny sa nepodarilo uložiť. Skúste znova.');
         var updated = await res.json();
-        cache.set(id, updated);
         if (this.current.id !== id) return;
         this.checked = draft.filter(entry => entry.original !== null && this.checked.includes(entry.original)).map(entry => entry.text.trim());
         this.current = updated;
@@ -817,21 +814,18 @@ function itineraryApp() {
       this.error = '';
       if (decodeURIComponent(location.hash.slice(1)) !== id) history.replaceState(null, '', '#' + encodeURIComponent(id));
 
-      var it = cache.get(id);
-      if (!it) {
-        this.loading = true;
-        try {
-          var res = await fetch('/api/v1/itineraries/' + encodeURIComponent(id), { headers: { Accept: 'application/json' } });
-          if (!res.ok) throw new Error(res.status === 404 ? 'Itinerár neexistuje.' : 'Chyba servera (' + res.status + ').');
-          it = await res.json();
-          cache.set(id, it);
-        } catch (e) {
-          if (this.selectedId === id) { this.error = e.message || 'Nepodarilo sa načítať itinerár.'; this.loading = false; }
-          return;
-        }
-        if (this.selectedId !== id) return; // a newer selection won the race
-        this.loading = false;
+      this.loading = true;
+      try {
+        var res = await fetch('/api/v1/itineraries/' + encodeURIComponent(id), { headers: { Accept: 'application/json' } });
+        if (!res.ok) throw new Error(res.status === 404 ? 'Itinerár neexistuje.' : 'Chyba servera (' + res.status + ').');
+        var it = await res.json();
+      } catch (e) {
+        if (this.selectedId === id) this.error = e.message || 'Nepodarilo sa načítať itinerár.';
+        return;
+      } finally {
+        if (this.selectedId === id) this.loading = false;
       }
+      if (this.selectedId !== id) return;
       this.current = it;
       this.checkChecklistAccess();
       this.dayIndex = 0;
@@ -960,7 +954,6 @@ function itineraryApp() {
     saveImport: async function () {
       var res = await this.importRequest(false);
       if (!res) return;
-      cache.set(res.id, res.itinerary);
       this.io.text = '';
       this.io.preview = null;
       this.$refs.io.close();
@@ -1000,8 +993,7 @@ function itineraryApp() {
     },
 
     toggle: function (item) {
-      var i = this.checked.indexOf(item);
-      if (i === -1) this.checked.push(item); else this.checked.splice(i, 1);
+      this.checked = this.checked.includes(item) ? this.checked.filter(value => value !== item) : this.checked.concat(item);
       this.save();
     }
   };

@@ -8,6 +8,7 @@ Data lives in memory and is written atomically to `data/itineraries.json` on eve
 ```sh
 go run .                       # http://localhost:9876
 go test ./...
+node --test checklist_test.cjs
 docker build -t itinerary . && docker run -p 9876:9876 -v itinerary-data:/root/data itinerary
 ```
 
