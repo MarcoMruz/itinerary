@@ -332,18 +332,23 @@
           <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" d="M6 6l12 12M18 6L6 18"/></svg>
         </button>
       </div>
-      <p class="mt-2 text-sm text-stone-500">Stiahnite súbor, nahrajte ho AI asistentovi a napíšte, čo chcete vytvoriť alebo zmeniť. Súbor obsahuje pokyny pre asistenta. To, čo vám vráti, importujte nižšie.</p>
+      <p class="mt-2 text-sm text-stone-500">Napíšte, čo chcete vytvoriť alebo zmeniť, a cez „Kopírovať pre chat“ to vložte do ChatGPT, Gemini alebo Claude ako jednu správu. Alebo súbor stiahnite a priložte. Súbor obsahuje pokyny pre asistenta. To, čo vám vráti, importujte nižšie.</p>
 
       <h3 class="mt-5 flex items-center gap-2 text-sm font-bold text-stone-900">
         <span class="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-700 text-[11px] text-white">1</span> Súbor pre asistenta
       </h3>
+      <label class="mt-2 block">
+        <span class="text-sm text-stone-600">Čo má asistent urobiť? <span class="text-stone-400">(nepovinné, pre „Kopírovať pre chat“)</span></span>
+        <textarea x-model="io.request" rows="2" maxlength="2000" placeholder="napr. Pridaj na sobotu obed v Hrabušiciach a do checklistu opaľovací krém."
+                  class="mt-1 w-full rounded-xl border border-stone-200 bg-stone-50 p-3 text-sm focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200"></textarea>
+      </label>
       <div class="mt-2 grid gap-3 sm:grid-cols-2">
         <div class="rounded-2xl p-4 ring-1 ring-stone-200" x-show="current">
           <p class="font-semibold text-stone-900">Upraviť tento itinerár</p>
           <p class="mt-0.5 truncate text-xs text-stone-500" x-text="current ? current.title : ''"></p>
           <div class="mt-3 flex flex-wrap gap-2">
             <a :href="exportUrl" download class="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-500">Exportovať</a>
-            <button type="button" @click="copyFile(exportUrl)" class="rounded-lg px-3 py-2 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-50">Kopírovať</button>
+            <button type="button" @click="copyForChat(exportUrl, 'update')" class="rounded-lg px-3 py-2 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-50">Kopírovať pre chat</button>
           </div>
         </div>
         <div class="rounded-2xl p-4 ring-1 ring-stone-200">
@@ -351,7 +356,7 @@
           <p class="mt-0.5 text-xs text-stone-500">Prázdna kostra s príkladom a pravidlami</p>
           <div class="mt-3 flex flex-wrap gap-2">
             <a href="/api/v1/import/template" download class="rounded-lg bg-amber-400 px-3 py-2 text-sm font-semibold text-emerald-950 hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-emerald-500">Stiahnuť šablónu</a>
-            <button type="button" @click="copyFile('/api/v1/import/template')" class="rounded-lg px-3 py-2 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-50">Kopírovať</button>
+            <button type="button" @click="copyForChat('/api/v1/import/template', 'create')" class="rounded-lg px-3 py-2 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-50">Kopírovať pre chat</button>
           </div>
         </div>
       </div>
@@ -460,6 +465,17 @@ function fmtLeg(leg) {
   return leg ? fmtDistance(leg.meters) + ' · ' + fmtDuration(leg.seconds) : '';
 }
 
+// One chat message: the person's request, a pointer to the rules inside the file, and the file itself.
+function chatMessage(request, action, fileText) {
+  var ask = (request || '').trim() || (action === 'update'
+    ? 'Pomôž mi upraviť tento itinerár. Najprv sa ma opýtaj, čo chcem zmeniť.'
+    : 'Vytvor nový itinerár podľa tejto šablóny. Najprv sa ma opýtaj na cieľ, termín, kto cestuje a čo nás baví.');
+  return ask + '\n\n' +
+    'Postupuj podľa pravidiel v poli "instructions" v JSON nižšie a výsledok mi vráť ako celý dokument v rovnakom formáte ' +
+    '(ideálne ako súbor .json), aby som ho mohol importovať do aplikácie Rodinné itineráre.\n\n' +
+    '```json\n' + fileText.trim() + '\n```\n';
+}
+
 function stopCount(n) {
   return n + (n === 1 ? ' zastávka' : n < 5 ? ' zastávky' : ' zastávok');
 }
@@ -492,7 +508,7 @@ function itineraryApp() {
     loading: false,
     error: '',
     notice: '',
-    io: { text: '', token: '', needToken: false, busy: false, error: '', preview: null, copyMessage: '' },
+    io: { request: '', text: '', token: '', needToken: false, busy: false, error: '', preview: null, copyMessage: '' },
     fieldLabels: { title: 'názov', subtitle: 'podnadpis', duration: 'dĺžka', targetAudience: 'pre koho', startLocation: 'štart', mapsUrl: 'odkaz na mapu', days: 'program dní', checklist: 'checklist' },
     routeStart: '', // start as last committed (blur/Enter); distances are measured from it, not from every keystroke
     legsByKey: {}, // legsKey → day legs answer { legs, places, complete }
@@ -793,13 +809,13 @@ function itineraryApp() {
       this.$refs.io.showModal();
     },
 
-    // Copying suits phones, where the chat app is easier to paste into than to attach a file.
-    copyFile: async function (url) {
+    // Copying suits phones, where pasting one message into the chat app is easier than attaching a file.
+    copyForChat: async function (url, action) {
       try {
         var res = await fetch(url, { headers: { Accept: 'application/json' } });
         if (!res.ok) throw new Error();
-        await navigator.clipboard.writeText(await res.text());
-        this.io.copyMessage = 'Skopírované. Vložte to do chatu s asistentom a napíšte, čo chcete.';
+        await navigator.clipboard.writeText(chatMessage(this.io.request, action, await res.text()));
+        this.io.copyMessage = 'Skopírované. Vložte to do chatu s asistentom ako jednu správu.';
       } catch (e) {
         this.io.copyMessage = 'Kopírovanie zlyhalo, použite stiahnutie.';
       }
