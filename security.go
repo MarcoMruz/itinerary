@@ -169,7 +169,8 @@ func protect(cfg SecurityConfig, next http.Handler) http.Handler {
 // It reports whether the request was fully handled.
 func handleCORS(w http.ResponseWriter, r *http.Request, allowed []string) bool {
 	origin := r.Header.Get("Origin")
-	api := strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/mcp"
+	api := strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/mcp" ||
+		r.URL.Path == "/oauth/token" || r.URL.Path == "/oauth/register" || strings.HasPrefix(r.URL.Path, "/.well-known/")
 	if origin == "" || !api {
 		return false
 	}

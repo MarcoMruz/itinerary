@@ -35,6 +35,7 @@ type API struct {
 	token     string // optional bearer token guarding writes
 	readToken string // optional bearer token guarding reads and MCP
 	publicURL string // optional absolute base URL for the OpenAPI document
+	auth      *Auth  // Google sign-in and OAuth for MCP clients; nil = tokens only
 	geo       *Geo   // nil disables distances
 	// startLimiter caps uncached start lookups per client, so one visitor
 	// cannot occupy the shared, rate-limited geocoder.
@@ -115,30 +116,36 @@ func bearerMatches(r *http.Request, token string) bool {
 }
 
 // authorized fails closed: with only READ_API_TOKEN set, writes are disabled.
+// Signed-in Google accounts (OAuth access tokens) get full access.
 func (a *API) authorized(r *http.Request) bool {
-	return !a.readsProtected() || bearerMatches(r, a.token)
+	return !a.readsProtected() || bearerMatches(r, a.token) || a.oauthBearer(r)
 }
+
+func (a *API) oauthBearer(r *http.Request) bool { return a.auth != nil && a.auth.bearerEmail(r) != "" }
 
 // canRead accepts either token once any token is configured; withSession also accepts the UI cookie.
 func (a *API) canRead(r *http.Request, withSession bool) bool {
 	if !a.readsProtected() {
 		return true
 	}
-	return bearerMatches(r, a.token) || bearerMatches(r, a.readToken) || (withSession && a.validSession(r))
+	return bearerMatches(r, a.token) || bearerMatches(r, a.readToken) || a.oauthBearer(r) || (withSession && a.validSession(r))
 }
 
-func (a *API) readsProtected() bool { return a.token != "" || a.readToken != "" }
+func (a *API) readsProtected() bool { return a.token != "" || a.readToken != "" || a.auth != nil }
 
 func (a *API) sessionValue() string { return sessionMAC(a.token + "\x00" + a.readToken) }
 
 func (a *API) validSession(r *http.Request) bool {
+	if a.auth != nil {
+		return a.auth.sessionEmail(r) != ""
+	}
 	c, err := r.Cookie(sessionCookie)
 	return err == nil && hmac.Equal([]byte(c.Value), []byte(a.sessionValue()))
 }
 
 // setSession gives the web UI read access to the API without exposing a token to JS.
 func (a *API) setSession(w http.ResponseWriter, r *http.Request) {
-	if !a.readsProtected() {
+	if !a.readsProtected() || a.auth != nil { // with Google sign-in the login cookie does this
 		return
 	}
 	http.SetCookie(w, &http.Cookie{
@@ -151,10 +158,19 @@ func (a *API) setSession(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// challenge points OAuth clients at the metadata that starts sign-in (RFC 9728).
+func (a *API) challenge(w http.ResponseWriter) {
+	if a.auth != nil {
+		w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="`+a.auth.resourceMetadataURL()+`"`)
+		return
+	}
+	w.Header().Set("WWW-Authenticate", "Bearer")
+}
+
 func (a *API) requireToken(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !a.authorized(r) {
-			w.Header().Set("WWW-Authenticate", "Bearer")
+			a.challenge(w)
 			writeError(w, http.StatusUnauthorized, "missing or invalid bearer token")
 			return
 		}
@@ -172,7 +188,7 @@ func (a *API) requireUIRead(next http.HandlerFunc) http.HandlerFunc { return a.r
 func (a *API) requireRead(withSession bool, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !a.canRead(r, withSession) {
-			w.Header().Set("WWW-Authenticate", "Bearer")
+			a.challenge(w)
 			writeError(w, http.StatusUnauthorized, "missing or invalid bearer token")
 			return
 		}

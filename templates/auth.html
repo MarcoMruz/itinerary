@@ -1,0 +1,54 @@
+{{define "page"}}<!doctype html>
+<html lang="sk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#064e3b">
+  <title>{{.Title}} · Rodinné itineráre</title>
+  <style>
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px; box-sizing: border-box;
+           font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #292524;
+           background: linear-gradient(135deg, #064e3b, #047857); }
+    main { width: 100%; max-width: 420px; background: #fafaf9; border-radius: 16px; padding: 28px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+    .brand { font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: #047857; }
+    h1 { margin: 8px 0 12px; font-size: 22px; }
+    p { line-height: 1.5; margin: 0 0 12px; }
+    .muted { color: #78716c; font-size: 14px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+    .btn { display: inline-block; border: 0; border-radius: 10px; padding: 11px 18px; font: inherit; font-weight: 600;
+           cursor: pointer; text-decoration: none; background: #fbbf24; color: #022c22; }
+    .btn:hover { background: #fcd34d; }
+    .btn.secondary { background: #e7e5e4; color: #292524; }
+    .btn:focus-visible { outline: 3px solid #047857; outline-offset: 2px; }
+  </style>
+</head>
+<body>
+<main>
+  <div class="brand">Rodinné itineráre</div>
+  <h1>{{.Title}}</h1>
+  {{if eq .Kind "login"}}
+    <p>Itineráre sú súkromné. Prihláste sa Google účtom, ktorý má prístup.</p>
+    <div class="actions"><a class="btn" id="login" href="/auth/login">Prihlásiť sa cez Google</a></div>
+    <script>
+      // Keep a private checklist link (#id~key) across the Google round trip.
+      document.getElementById('login').addEventListener('click', function () {
+        try { if (location.hash) sessionStorage.setItem('itinerary_hash', location.hash); } catch (e) {}
+      });
+    </script>
+  {{else if eq .Kind "consent"}}
+    <p><strong>{{.Client}}</strong> žiada prístup k itinerárom pre účet <strong>{{.Email}}</strong>.</p>
+    <p class="muted">Po povolení bude môcť itineráre čítať, pridávať a upravovať. Odpoveď pôjde na {{.Host}}.
+      Povoľte len aplikáciu, ktorú ste práve pridávali.</p>
+    <form method="post" action="/oauth/consent" class="actions">
+      <input type="hidden" name="consent" value="{{.Token}}">
+      <button class="btn" name="decision" value="allow">Povoliť</button>
+      <button class="btn secondary" name="decision" value="deny">Zamietnuť</button>
+    </form>
+  {{else}}
+    <p>{{.Message}}</p>
+    <div class="actions"><a class="btn secondary" href="/">Späť</a></div>
+  {{end}}
+</main>
+</body>
+</html>{{end}}

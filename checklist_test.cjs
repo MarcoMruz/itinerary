@@ -85,3 +85,19 @@ test('blank items never reach the server; empty checklist can be saved', async (
   assert.equal(calls, 1);
   assert.equal(app.current.checklist.length, 0);
 });
+
+test('copy for chat puts the request before the export file', async () => {
+  let copied;
+  const app = setup(async () => ({ ok: true, text: async () => '{"format":"family-itinerary"}\n' }), {
+    clipboard: { writeText: async text => { copied = text; } },
+  });
+  app.io.request = '  Pridaj obed v sobotu. ';
+  await app.copyForChat('/api/v1/itineraries/trip/export', 'update');
+  assert.ok(copied.startsWith('Pridaj obed v sobotu.\n\nPostupuj podľa pravidiel'));
+  assert.ok(copied.endsWith('```json\n{"format":"family-itinerary"}\n```\n'));
+  assert.equal(app.io.copyMessage, 'Skopírované. Vložte to do chatu s asistentom ako jednu správu.');
+
+  app.io.request = '';
+  await app.copyForChat('/api/v1/import/template', 'create');
+  assert.ok(copied.startsWith('Vytvor nový itinerár podľa tejto šablóny.'));
+});
