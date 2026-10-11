@@ -347,6 +347,11 @@ type mcpToolResult struct {
 
 var mcpTools = []mcpTool{
 	{
+		Name:        "get_share_link",
+		Description: "Get or create the read-only share link for an itinerary. Anyone with the link can view that one itinerary without signing in, but cannot change it. Requires write access.",
+		InputSchema: schema{"type": "object", "required": []string{"id"}, "additionalProperties": false, "properties": schema{"id": strProp("Existing itinerary id")}},
+	},
+	{
 		Name:        "get_owner_link",
 		Description: "Get or create the private checklist edit link for an itinerary. Anyone with this link can edit its checklist. Requires write access. Keep the link private.",
 		InputSchema: schema{"type": "object", "required": []string{"id"}, "additionalProperties": false, "properties": schema{"id": strProp("Existing itinerary id")}},

@@ -12,14 +12,29 @@ import (
 	"path/filepath"
 )
 
-// Owner keys live outside itineraries so public reads and exports cannot expose them.
+// Owner and share keys live outside itineraries so public reads and exports cannot expose them.
 func (s *Store) ownerKey(id string, create bool) (string, error) {
+	return s.itineraryKey("owner-keys.json", id, create, false)
+}
+
+// shareKey guards the read-only link of one itinerary.
+func (s *Store) shareKey(id string, create bool) (string, error) {
+	return s.itineraryKey("share-keys.json", id, create, false)
+}
+
+// revokeShareKey removes the key: the link and cookies issued for it stop working.
+func (s *Store) revokeShareKey(id string) error {
+	_, err := s.itineraryKey("share-keys.json", id, false, true)
+	return err
+}
+
+func (s *Store) itineraryKey(file, id string, create, remove bool) (string, error) {
 	s.wmu.Lock()
 	defer s.wmu.Unlock()
 	if _, ok := s.Get(id); !ok {
 		return "", ErrNotFound
 	}
-	path := filepath.Join(filepath.Dir(s.path), "owner-keys.json")
+	path := filepath.Join(filepath.Dir(s.path), file)
 	keys := map[string]string{}
 	data, err := os.ReadFile(path)
 	if err == nil {
@@ -29,16 +44,23 @@ func (s *Store) ownerKey(id string, create bool) (string, error) {
 		return "", err
 	}
 	if keys == nil {
-		return "", errors.New("invalid owner key file")
+		return "", errors.New("invalid key file " + file)
 	}
-	if keys[id] != "" || !create {
+	switch {
+	case remove:
+		if keys[id] == "" {
+			return "", nil
+		}
+		delete(keys, id)
+	case keys[id] != "" || !create:
 		return keys[id], nil
+	default:
+		var random [32]byte
+		if _, err := rand.Read(random[:]); err != nil {
+			return "", err
+		}
+		keys[id] = hex.EncodeToString(random[:])
 	}
-	var random [32]byte
-	if _, err := rand.Read(random[:]); err != nil {
-		return "", err
-	}
-	keys[id] = hex.EncodeToString(random[:])
 	data, err = json.MarshalIndent(keys, "", "  ")
 	if err != nil {
 		return "", err

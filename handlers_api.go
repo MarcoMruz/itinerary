@@ -128,7 +128,7 @@ func (a *API) canRead(r *http.Request, withSession bool) bool {
 	if !a.readsProtected() {
 		return true
 	}
-	return bearerMatches(r, a.token) || bearerMatches(r, a.readToken) || a.oauthBearer(r) || (withSession && a.validSession(r))
+	return bearerMatches(r, a.token) || bearerMatches(r, a.readToken) || a.oauthBearer(r) || (withSession && (a.validSession(r) || a.hasShareAccess(r)))
 }
 
 func (a *API) readsProtected() bool { return a.token != "" || a.readToken != "" || a.auth != nil }
@@ -521,6 +521,21 @@ func (a *API) callTool(r *http.Request, raw json.RawMessage) (any, *rpcError) {
 			return toolError(err.Error()), nil
 		}
 		return toolJSON(schema{"url": a.baseURL(r) + "/#" + args.ID + "~" + key}), nil
+	case "get_share_link":
+		if !a.authorized(r) {
+			return toolError("unauthorized: get_share_link requires write access"), nil
+		}
+		var args struct {
+			ID string `json:"id"`
+		}
+		if err := decodeRaw(p.Arguments, &args); err != nil {
+			return nil, &rpcError{rpcInvalidParams, "invalid arguments: " + err.Error()}
+		}
+		key, err := a.store.shareKey(args.ID, true)
+		if err != nil {
+			return toolError(err.Error()), nil
+		}
+		return toolJSON(schema{"url": a.shareURL(r, args.ID, key)}), nil
 	case "update_itinerary":
 		if !a.authorized(r) {
 			return toolError("unauthorized: update_itinerary requires 'Authorization: Bearer <API_TOKEN>'"), nil

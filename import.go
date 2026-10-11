@@ -204,9 +204,9 @@ func changedFields(before, after *Itinerary) []string {
 	return changes
 }
 
-// canImport also lets a signed-in person import from the page; the Origin
-// check keeps other sites from using their cookie.
-func (a *API) canImport(r *http.Request) bool {
+// canWriteFromPage also lets a signed-in person import and share from the
+// page; the Origin check keeps other sites from using their cookie.
+func (a *API) canWriteFromPage(r *http.Request) bool {
 	if a.authorized(r) {
 		return true
 	}
@@ -218,7 +218,7 @@ func (a *API) canImport(r *http.Request) bool {
 }
 
 func (a *API) importHandler(w http.ResponseWriter, r *http.Request) {
-	if !a.canImport(r) {
+	if !a.canWriteFromPage(r) {
 		a.challenge(w)
 		writeError(w, http.StatusUnauthorized, "sign in or send 'Authorization: Bearer <API_TOKEN>' to import")
 		return
