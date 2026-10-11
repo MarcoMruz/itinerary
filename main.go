@@ -126,6 +126,9 @@ func newHandler(store *Store, api *API, sec SecurityConfig) (http.Handler, error
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", indexHandler(store, api, tmpl))
+	mux.HandleFunc("GET /s/{id}/{key}", sharedHandler(store, api, tmpl))
+	mux.HandleFunc("POST /api/v1/itineraries/{id}/share-link", api.createShareLink)
+	mux.HandleFunc("DELETE /api/v1/itineraries/{id}/share-link", api.revokeShareLink)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
 	mux.HandleFunc("GET /robots.txt", robotsTxt)
 
@@ -152,14 +155,28 @@ func newHandler(store *Store, api *API, sec SecurityConfig) (http.Handler, error
 	return protect(sec, mux), nil
 }
 
+type bootData struct {
+	List   []Summary  `json:"list"`
+	Active *Itinerary `json:"active"`
+	Shared bool       `json:"shared"` // read-only share link: one itinerary, no list or actions
+	User   string     `json:"-"`      // signed-in Google account, shown in the footer
+}
+
+func renderPage(w http.ResponseWriter, tmpl *template.Template, data bootData) {
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		log.Printf("render index: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "private, no-cache") // sets cookies: never cache at the edge
+	buf.WriteTo(w)
+}
+
 // indexHandler renders the shell with the list and first itinerary inlined,
 // so the first paint needs no extra API round trip.
 func indexHandler(store *Store, api *API, tmpl *template.Template) http.HandlerFunc {
-	type bootData struct {
-		List   []Summary  `json:"list"`
-		Active *Itinerary `json:"active"`
-		User   string     `json:"-"` // signed-in Google account, shown in the footer
-	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		var user string
 		if api.auth != nil {
@@ -173,16 +190,25 @@ func indexHandler(store *Store, api *API, tmpl *template.Template) http.HandlerF
 		if len(data.List) > 0 {
 			data.Active, _ = store.Get(data.List[0].ID)
 		}
-		var buf bytes.Buffer
-		if err := tmpl.Execute(&buf, data); err != nil {
-			log.Printf("render index: %v", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
+		api.setSession(w, r)
+		renderPage(w, tmpl, data)
+	}
+}
+
+// sharedHandler opens one itinerary from a read-only share link, signed in or not.
+func sharedHandler(store *Store, api *API, tmpl *template.Template) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, key := r.PathValue("id"), r.PathValue("key")
+		it, ok := store.Get(id)
+		if !ok || !api.validShareKey(id, key) {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte("Tento odkaz už neplatí. Požiadajte o nový.\n"))
 			return
 		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "private, no-cache") // sets the session cookie: never cache at the edge
-		api.setSession(w, r)
-		buf.WriteTo(w)
+		api.setShareCookie(w, r, id, key)
+		w.Header().Set("Referrer-Policy", "no-referrer") // the key is in the URL
+		renderPage(w, tmpl, bootData{List: []Summary{it.Summary()}, Active: it, Shared: true})
 	}
 }
 

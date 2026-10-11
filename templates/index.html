@@ -24,14 +24,15 @@
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-emerald-100">
           <!-- Phones: itineraries and actions live in the side drawer, so the trip itself gets the screen -->
-          <button type="button" @click="$refs.drawer.showModal()" aria-label="Menu: itineráre a akcie"
+          <button type="button" x-show="!shared" @click="$refs.drawer.showModal()" aria-label="Menu: itineráre a akcie"
                   class="-ml-2 rounded-xl p-2 text-white hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-amber-300 sm:hidden">
             <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" d="M4 7h16M4 12h16M4 17h16"/></svg>
           </button>
           <svg class="h-5 w-5 text-amber-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 20l6-16 4 10 3-5 5 11H3z"/></svg>
           Rodinné itineráre
         </div>
-        <div class="hidden items-center gap-2 sm:flex">
+        <span x-show="shared" class="rounded-full bg-white/15 px-3 py-1 text-xs font-semibold text-emerald-50">Zdieľané · len na čítanie</span>
+        <div x-show="!shared" class="hidden items-center gap-2 sm:flex">
         <label class="relative min-w-0 flex-1 sm:w-80 sm:flex-none" x-show="list.length">
           <span class="sr-only">Vybrať itinerár</span>
           <select x-model="selectedId" @change="select(selectedId)"
@@ -42,6 +43,11 @@
           </select>
           <svg class="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-emerald-100" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M5.3 7.3a1 1 0 011.4 0L10 10.6l3.3-3.3a1 1 0 111.4 1.4l-4 4a1 1 0 01-1.4 0l-4-4a1 1 0 010-1.4z"/></svg>
         </label>
+        <button type="button" x-show="current" @click="openShare()" title="Zdieľať na čítanie bez prihlásenia"
+                class="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-white/20 bg-white/10 px-3 py-2.5 text-sm font-semibold text-white backdrop-blur hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-amber-300">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path stroke-linecap="round" d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg>
+          Zdieľať
+        </button>
         <button type="button" @click="openIO()" title="Import a export pre AI asistentov"
                 class="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-white/20 bg-white/10 px-3 py-2.5 text-sm font-semibold text-white backdrop-blur hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-amber-300">
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M7 10l5-5 5 5M12 5v11M5 19h14"/></svg>
@@ -306,6 +312,11 @@
       </nav>
       <div class="border-t border-stone-200 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         <p class="px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-stone-500">Akcie</p>
+        <button type="button" x-show="current" @click="$refs.drawer.close(); openShare()"
+                class="flex w-full items-center gap-3 rounded-xl p-3 text-left hover:bg-stone-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
+          <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-400 text-emerald-950"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path stroke-linecap="round" d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg></span>
+          <span><span class="block font-semibold text-stone-900">Zdieľať na čítanie</span><span class="block text-xs text-stone-500">Odkaz bez prihlásenia, len tento itinerár</span></span>
+        </button>
         <button type="button" @click="$refs.drawer.close(); openIO()"
                 class="flex w-full items-center gap-3 rounded-xl p-3 text-left hover:bg-stone-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
           <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-700 text-white">
@@ -315,6 +326,41 @@
         </button>
         {{if .User}}<form method="post" action="/auth/logout" class="mt-1 px-3 py-2 text-xs text-stone-500">{{.User}} · <button class="font-semibold text-emerald-700 hover:underline">Odhlásiť sa</button></form>{{end}}
       </div>
+    </div>
+  </dialog>
+
+  <!-- Read-only share link: bottom sheet on phones, centered modal on larger screens -->
+  <dialog x-ref="share" @click="$event.target === $el && $el.close()" aria-labelledby="share-title"
+          class="m-0 mt-auto w-full max-w-none rounded-t-3xl bg-white p-0 text-stone-800 shadow-2xl backdrop:bg-stone-900/50 sm:m-auto sm:max-w-md sm:rounded-3xl">
+    <div class="p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:p-6">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-wide text-emerald-700">Zdieľať na čítanie</p>
+          <h2 id="share-title" class="mt-0.5 text-lg font-bold text-stone-900" x-text="current ? current.title : ''"></h2>
+        </div>
+        <button type="button" @click="$refs.share.close()" aria-label="Zavrieť"
+                class="-mr-2 -mt-1 rounded-full p-2 text-stone-400 hover:bg-stone-100 hover:text-stone-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
+          <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <p class="mt-2 text-sm text-stone-500">Ktokoľvek s týmto odkazom uvidí tento itinerár bez prihlásenia. Nemôže ho meniť a ostatné itineráre neuvidí.</p>
+      <p x-show="sharing.busy" class="mt-4 text-sm text-stone-500">Pripravuje sa odkaz…</p>
+      <div x-show="sharing.url" class="mt-4 flex gap-2">
+        <label class="min-w-0 flex-1">
+          <span class="sr-only">Odkaz na čítanie</span>
+          <input type="text" readonly :value="sharing.url" @focus="$el.select()" @click="$el.select()"
+                 class="w-full rounded-lg border border-stone-200 bg-stone-50 px-3 py-2.5 text-sm text-stone-700">
+        </label>
+        <button type="button" @click="copyShare()" title="Kopírovať odkaz" aria-label="Kopírovať odkaz"
+                class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500"><svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path stroke-linecap="round" stroke-linejoin="round" d="M5 15V6a2 2 0 012-2h9"/></svg></button>
+      </div>
+      <button type="button" x-show="sharing.url && canNativeShare" @click="nativeShare()"
+              class="mt-3 w-full rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-800">Poslať…</button>
+      <button type="button" x-show="!sharing.url && !sharing.busy && sharing.revoked" @click="loadShareLink()"
+              class="mt-4 w-full rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-800">Vytvoriť nový odkaz</button>
+      <p role="status" aria-live="polite" class="mt-3 text-sm" :class="sharing.failed ? 'text-red-700' : 'text-emerald-700'" x-text="sharing.message"></p>
+      <button type="button" x-show="sharing.url" @click="revokeShare()"
+              class="mt-3 text-xs font-semibold text-stone-400 hover:text-red-600">Zrušiť odkaz (prestane fungovať aj u tých, ktorí ho už majú)</button>
     </div>
   </dialog>
 
@@ -414,9 +460,10 @@
   </dialog>
 
   <footer class="border-t border-stone-200 py-4 text-center text-xs text-stone-400">
-    Agent ready: <a class="text-emerald-700 hover:underline" href="/api/v1/openapi.json">OpenAPI</a> ·
+    <p x-show="shared">Zdieľaný itinerár, len na čítanie. Odškrtnutie checklistu sa uloží iba vo vašom zariadení.</p>
+    <div x-show="!shared">Agent ready: <a class="text-emerald-700 hover:underline" href="/api/v1/openapi.json">OpenAPI</a> ·
     <a class="text-emerald-700 hover:underline" href="/api/v1/itineraries">REST API</a> ·
-    MCP <code>POST /mcp</code>
+    MCP <code>POST /mcp</code></div>
     {{if .User}}<form method="post" action="/auth/logout" class="mt-2">{{.User}} · <button class="text-emerald-700 hover:underline">Odhlásiť sa</button></form>{{end}}
   </footer>
 </div>
@@ -508,6 +555,9 @@ function itineraryApp() {
     loading: false,
     error: '',
     notice: '',
+    shared: !!boot.shared,
+    sharing: { url: '', busy: false, message: '', failed: false, revoked: false },
+    canNativeShare: typeof navigator !== 'undefined' && !!navigator.share,
     io: { request: '', text: '', token: '', needToken: false, busy: false, error: '', preview: null, copyMessage: '' },
     fieldLabels: { title: 'názov', subtitle: 'podnadpis', duration: 'dĺžka', targetAudience: 'pre koho', startLocation: 'štart', mapsUrl: 'odkaz na mapu', days: 'program dní', checklist: 'checklist' },
     routeStart: '', // start as last committed (blur/Enter); distances are measured from it, not from every keystroke
@@ -787,6 +837,59 @@ function itineraryApp() {
       this.dayIndex = 0;
       this.loadChecked();
       this.loadStart();
+    },
+
+    shareLinkUrl: function () {
+      return '/api/v1/itineraries/' + encodeURIComponent(this.current.id) + '/share-link';
+    },
+
+    openShare: function () {
+      this.sharing = { url: '', busy: false, message: '', failed: false, revoked: false };
+      this.$refs.share.showModal();
+      this.loadShareLink();
+    },
+
+    loadShareLink: async function () {
+      var id = this.current.id;
+      this.sharing.busy = true;
+      this.sharing.message = '';
+      this.sharing.failed = false;
+      try {
+        var res = await fetch(this.shareLinkUrl(), { method: 'POST', headers: { Accept: 'application/json' } });
+        if (res.status === 401) throw new Error('Na zdieľanie sa prihláste (alebo použite MCP nástroj get_share_link).');
+        if (!res.ok) throw new Error('Odkaz sa nepodarilo vytvoriť. Skúste znova.');
+        var body = await res.json();
+        if (this.current.id === id) { this.sharing.url = body.url; this.sharing.revoked = false; }
+      } catch (e) {
+        this.sharing.failed = true;
+        this.sharing.message = e.message;
+      } finally { this.sharing.busy = false; }
+    },
+
+    copyShare: async function () {
+      try {
+        await navigator.clipboard.writeText(this.sharing.url);
+        this.sharing.failed = false;
+        this.sharing.message = 'Odkaz je skopírovaný.';
+      } catch (e) {
+        this.sharing.message = 'Skopírujte odkaz z poľa vyššie.';
+      }
+    },
+
+    nativeShare: async function () {
+      try { await navigator.share({ title: this.current.title, url: this.sharing.url }); } catch (e) { /* closed by the user */ }
+    },
+
+    revokeShare: async function () {
+      if (!window.confirm('Zrušiť odkaz? Prestane fungovať aj u tých, ktorým ste ho poslali.')) return;
+      try {
+        var res = await fetch(this.shareLinkUrl(), { method: 'DELETE' });
+        if (!res.ok) throw new Error();
+        this.sharing = { url: '', busy: false, message: 'Odkaz je zrušený a už nefunguje.', failed: false, revoked: true };
+      } catch (e) {
+        this.sharing.failed = true;
+        this.sharing.message = 'Odkaz sa nepodarilo zrušiť. Skúste znova.';
+      }
     },
 
     get exportUrl() {

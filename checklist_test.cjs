@@ -7,7 +7,7 @@ function setup(fetch, navigator = {}) {
   const current = { id: 'trip', days: [], checklist: ['Water', 'Hat'] };
   const context = vm.createContext({
     document: { getElementById: () => ({ textContent: JSON.stringify({ active: current }) }) },
-    localStorage: { getItem: () => null, setItem() {} }, fetch, navigator,
+    localStorage: { getItem: () => null, setItem() {} }, fetch, navigator, window: { confirm: () => true },
   });
   const html = fs.readFileSync('templates/index.html', 'utf8');
   vm.runInContext(html.split('<script>')[1].split('</script>')[0], context);
@@ -100,4 +100,23 @@ test('copy for chat puts the request before the export file', async () => {
   app.io.request = '';
   await app.copyForChat('/api/v1/import/template', 'create');
   assert.ok(copied.startsWith('Vytvor nový itinerár podľa tejto šablóny.'));
+});
+
+test('share link is created, copied and revoked', async () => {
+  let copied;
+  const calls = [];
+  const app = setup(async (url, options) => {
+    calls.push(options.method + ' ' + url);
+    return options.method === 'DELETE' ? { ok: true } : { ok: true, status: 200, json: async () => ({ url: 'https://example.com/s/trip/key' }) };
+  }, { clipboard: { writeText: async text => { copied = text; } } });
+  app.$refs = { share: { showModal() {} } };
+  app.openShare();
+  await new Promise(r => setTimeout(r, 0));
+  assert.equal(app.sharing.url, 'https://example.com/s/trip/key');
+  await app.copyShare();
+  assert.equal(copied, 'https://example.com/s/trip/key');
+  await app.revokeShare();
+  assert.deepEqual(calls, ['POST /api/v1/itineraries/trip/share-link', 'DELETE /api/v1/itineraries/trip/share-link']);
+  assert.equal(app.sharing.url, '');
+  assert.equal(app.sharing.revoked, true);
 });

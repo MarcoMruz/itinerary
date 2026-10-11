@@ -105,6 +105,18 @@ also wrapped in a ```` ```json ```` block or surrounded by text. `update` replac
 Importing needs write access: `API_TOKEN` as a bearer token (the dialog asks for it), or a Google sign-in
 on the page itself (same-origin requests only).
 
+## Read-only share links
+
+**Zdieľať** (header on larger screens, side menu on phones) creates a link like `https://<host>/s/<id>/<key>`
+that opens that one itinerary without signing in, even with Google sign-in on. The visitor cannot change it,
+does not see the list or other itineraries, and gets no Import / Export or sharing actions.
+Checklist ticks stay in their own browser, as for everyone.
+
+- Create or get: `POST /api/v1/itineraries/{id}/share-link` (write token, or signed in on the page) or MCP `get_share_link`.
+- Revoke: `DELETE /api/v1/itineraries/{id}/share-link` or **Zrušiť odkaz** in the dialog. The old link and the cookies
+  it issued stop working at once; sharing again creates a new link.
+- Keys are stored in `share-keys.json` beside `DATA_FILE` (owner-only permissions); keep it with your backups.
+
 ## Private checklist editing
 
 Use MCP `get_owner_link` with an itinerary `id`, or `POST /api/v1/itineraries/{id}/owner-link`
