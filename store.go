@@ -158,6 +158,22 @@ func (s *Store) Update(id string, changes map[string]json.RawMessage) (*Itinerar
 	return updated, nil
 }
 
+// Replace swaps an existing itinerary for a normalized one with the same id.
+func (s *Store) Replace(it *Itinerary) error {
+	copy, err := cloneItinerary(it)
+	if err != nil {
+		return err
+	}
+	return s.commit(func() (func(), error) {
+		previous, ok := s.items[copy.ID]
+		if !ok {
+			return nil, ErrNotFound
+		}
+		s.items[copy.ID] = copy
+		return func() { s.items[copy.ID] = previous }, nil
+	})
+}
+
 // Delete removes an itinerary. It returns ErrNotFound for unknown ids.
 func (s *Store) Delete(id string) error {
 	return s.commit(func() (func(), error) {

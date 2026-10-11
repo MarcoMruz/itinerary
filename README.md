@@ -66,7 +66,7 @@ e.g. a claude.ai custom connector that then also works in the Claude mobile and 
 
 How it works: the app is its own OAuth 2.1 authorization server (metadata at `/.well-known/oauth-authorization-server`
 and `/.well-known/oauth-protected-resource/mcp`, dynamic client registration, PKCE S256 required) and uses Google only
-to learn who signs in. Every allowed account gets full read/write access through MCP; the web session stays read-only.
+to learn who signs in. Every allowed account gets full read/write access through MCP; on the page a signed-in account can read and import.
 Access tokens last 1 hour, refresh tokens 60 days, web sessions 30 days. Client ids, codes and tokens are signed with
 `AUTH_SECRET` rather than stored. Removing an email from `ALLOWED_EMAILS` revokes that person at once;
 changing `AUTH_SECRET` (or deleting `auth-secret.key`) signs everyone out and disconnects every connector.
@@ -86,6 +86,24 @@ or MCP `update_itinerary` with `{"id":"slovensky-raj-1yo","changes":{"checklist"
 Only supplied fields change. Arrays replace in full; `checklist: []` clears the list and an empty string clears optional text.
 IDs cannot change. Empty updates, null values, unknown fields and invalid itineraries are rejected.
 Updates require the write token, return the updated itinerary, and never create a missing itinerary.
+
+## Import / export for AI assistants
+
+The **Import / Export** button on the page lets ChatGPT, Gemini or Claude write itineraries without any integration:
+
+1. **Exportovať** downloads the current itinerary (`GET /api/v1/itineraries/{id}/export`, action `update`);
+   **Stiahnuť šablónu** downloads an example skeleton (`GET /api/v1/import/template`, action `create`).
+   **Kopírovať** puts the same file on the clipboard for pasting into a chat.
+2. Give the file to the assistant and say what to create or change. The file carries the rules and the JSON Schema,
+   so the assistant answers with the complete document in the same format.
+3. Paste the answer (or pick the returned file) and click **Skontrolovať**: a preview shows whether it adds a new itinerary
+   or replaces an existing one and which fields change. **Uložiť** saves it.
+
+`POST /api/v1/import` (add `?dryRun=true` for the preview) accepts the export document or a bare itinerary,
+also wrapped in a ```` ```json ```` block or surrounded by text. `update` replaces the whole itinerary with that id
+(omitted fields are cleared, unlike `PATCH`); `create` adds a new one; without an action an existing id means update.
+Importing needs write access: `API_TOKEN` as a bearer token (the dialog asks for it), or a Google sign-in
+on the page itself (same-origin requests only).
 
 ## Private checklist editing
 

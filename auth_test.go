@@ -297,3 +297,18 @@ func TestSignInGatesPage(t *testing.T) {
 		t.Fatalf("forged state: %d", res.StatusCode)
 	}
 }
+
+func TestSignedInImportNeedsSameOrigin(t *testing.T) {
+	srv, g := newAuthServer(t)
+	session := cookieOf(signIn(t, srv, g, send(t, "GET", srv.URL+"/auth/login", "")), loginCookie)
+	body := `{"action":"create","itinerary":{"title":"Z webu","days":[{"activities":[]}]}}`
+	if res := send(t, "POST", srv.URL+"/api/v1/import", body, "Cookie", session.String(), "Origin", "https://evil.test"); res.StatusCode != 401 {
+		t.Fatalf("cross-origin import with cookie: %d", res.StatusCode)
+	}
+	if res := send(t, "POST", srv.URL+"/api/v1/import", body, "Cookie", session.String()); res.StatusCode != 401 {
+		t.Fatalf("import with cookie and no Origin: %d", res.StatusCode)
+	}
+	if res := send(t, "POST", srv.URL+"/api/v1/import", body, "Cookie", session.String(), "Origin", srv.URL); res.StatusCode != 201 {
+		t.Fatalf("signed-in import from the page: %d %s", res.StatusCode, readBody(res))
+	}
+}

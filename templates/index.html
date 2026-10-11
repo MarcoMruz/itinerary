@@ -26,7 +26,8 @@
           <svg class="h-5 w-5 text-amber-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 20l6-16 4 10 3-5 5 11H3z"/></svg>
           Rodinné itineráre
         </div>
-        <label class="relative w-full sm:w-80" x-show="list.length">
+        <div class="flex w-full items-center gap-2 sm:w-auto">
+        <label class="relative min-w-0 flex-1 sm:w-80 sm:flex-none" x-show="list.length">
           <span class="sr-only">Vybrať itinerár</span>
           <select x-model="selectedId" @change="select(selectedId)"
                   class="w-full appearance-none rounded-xl border border-white/20 bg-white/10 py-2.5 pl-4 pr-10 text-sm font-medium text-white backdrop-blur focus:outline-none focus:ring-2 focus:ring-amber-300">
@@ -36,6 +37,12 @@
           </select>
           <svg class="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-emerald-100" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path d="M5.3 7.3a1 1 0 011.4 0L10 10.6l3.3-3.3a1 1 0 111.4 1.4l-4 4a1 1 0 01-1.4 0l-4-4a1 1 0 010-1.4z"/></svg>
         </label>
+        <button type="button" @click="openIO()" title="Import a export pre AI asistentov"
+                class="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-white/20 bg-white/10 px-3 py-2.5 text-sm font-semibold text-white backdrop-blur hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-amber-300">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M7 10l5-5 5 5M12 5v11M5 19h14"/></svg>
+          Import / Export
+        </button>
+        </div>
       </div>
 
       <template x-if="current">
@@ -57,10 +64,12 @@
   </header>
 
   <main class="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6">
+    <div x-show="notice" class="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800" role="status" x-text="notice"></div>
     <div x-show="error" class="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" x-text="error"></div>
 
     <div x-show="!current && !error" class="rounded-2xl border border-dashed border-stone-300 p-10 text-center text-stone-500">
-      Zatiaľ žiadne itineráre. Pridajte ich cez <code class="text-emerald-700">POST /api/v1/itineraries</code> alebo MCP nástroj <code class="text-emerald-700">add_itinerary</code>.
+      Zatiaľ žiadne itineráre. Pridajte ich cez <code class="text-emerald-700">POST /api/v1/itineraries</code> alebo MCP nástroj <code class="text-emerald-700">add_itinerary</code>,
+      alebo cez <button type="button" @click="openIO()" class="font-semibold text-emerald-700 hover:underline">Import / Export</button> so šablónou pre AI asistenta.
     </div>
 
     <template x-if="current">
@@ -258,6 +267,96 @@
     </div>
   </dialog>
 
+  <!-- Import / export for AI assistants: bottom sheet on phones, centered modal on larger screens -->
+  <dialog x-ref="io" @click="$event.target === $el && $el.close()" aria-labelledby="io-title"
+          class="m-0 mt-auto max-h-[92vh] w-full max-w-none overflow-y-auto rounded-t-3xl bg-white p-0 text-stone-800 shadow-2xl backdrop:bg-stone-900/50 sm:m-auto sm:max-w-2xl sm:rounded-3xl">
+    <div class="p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:p-6">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-wide text-emerald-700">Pre ChatGPT, Gemini a Claude</p>
+          <h2 id="io-title" class="mt-0.5 text-lg font-bold text-stone-900">Import a export</h2>
+        </div>
+        <button type="button" @click="$refs.io.close()" aria-label="Zavrieť"
+                class="-mr-2 -mt-1 rounded-full p-2 text-stone-400 hover:bg-stone-100 hover:text-stone-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
+          <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <p class="mt-2 text-sm text-stone-500">Stiahnite súbor, nahrajte ho AI asistentovi a napíšte, čo chcete vytvoriť alebo zmeniť. Súbor obsahuje pokyny pre asistenta. To, čo vám vráti, importujte nižšie.</p>
+
+      <h3 class="mt-5 flex items-center gap-2 text-sm font-bold text-stone-900">
+        <span class="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-700 text-[11px] text-white">1</span> Súbor pre asistenta
+      </h3>
+      <div class="mt-2 grid gap-3 sm:grid-cols-2">
+        <div class="rounded-2xl p-4 ring-1 ring-stone-200" x-show="current">
+          <p class="font-semibold text-stone-900">Upraviť tento itinerár</p>
+          <p class="mt-0.5 truncate text-xs text-stone-500" x-text="current ? current.title : ''"></p>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <a :href="exportUrl" download class="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-500">Exportovať</a>
+            <button type="button" @click="copyFile(exportUrl)" class="rounded-lg px-3 py-2 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-50">Kopírovať</button>
+          </div>
+        </div>
+        <div class="rounded-2xl p-4 ring-1 ring-stone-200">
+          <p class="font-semibold text-stone-900">Nový itinerár zo šablóny</p>
+          <p class="mt-0.5 text-xs text-stone-500">Prázdna kostra s príkladom a pravidlami</p>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <a href="/api/v1/import/template" download class="rounded-lg bg-amber-400 px-3 py-2 text-sm font-semibold text-emerald-950 hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-emerald-500">Stiahnuť šablónu</a>
+            <button type="button" @click="copyFile('/api/v1/import/template')" class="rounded-lg px-3 py-2 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-50">Kopírovať</button>
+          </div>
+        </div>
+      </div>
+      <p role="status" aria-live="polite" class="mt-2 text-sm text-emerald-700" x-text="io.copyMessage"></p>
+
+      <h3 class="mt-4 flex items-center gap-2 text-sm font-bold text-stone-900">
+        <span class="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-700 text-[11px] text-white">2</span> Importovať odpoveď asistenta
+      </h3>
+      <form x-show="!io.preview" @submit.prevent="checkImport()" class="mt-2 space-y-3">
+        <label class="block">
+          <span class="sr-only">JSON od asistenta</span>
+          <textarea x-model="io.text" rows="5" placeholder="Vložte JSON, ktorý vám asistent vrátil…"
+                    class="w-full rounded-xl border border-stone-200 bg-stone-50 p-3 font-mono text-xs focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200"></textarea>
+        </label>
+        <label class="block text-sm text-stone-600">alebo vyberte súbor
+          <input type="file" accept=".json,application/json,text/plain" @change="readImportFile($event)"
+                 class="mt-1 block w-full text-sm text-stone-600 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-50 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-emerald-700 hover:file:bg-emerald-100">
+        </label>
+        <label class="block" x-show="io.needToken">
+          <span class="text-xs font-semibold uppercase tracking-wide text-stone-500">API token</span>
+          <input type="password" x-model="io.token" autocomplete="off" placeholder="Token s právom zápisu"
+                 class="mt-1 w-full rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200">
+        </label>
+        <button type="submit" :disabled="io.busy || !io.text.trim()" class="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" x-text="io.busy ? 'Kontroluje sa…' : 'Skontrolovať'"></button>
+      </form>
+
+      <div x-show="io.preview" class="mt-2 rounded-2xl p-4 ring-2" :class="io.preview && io.preview.action === 'update' ? 'bg-emerald-50/60 ring-emerald-300' : 'bg-amber-50/60 ring-amber-300'">
+        <template x-if="io.preview">
+          <div>
+            <span class="rounded-full px-2.5 py-0.5 text-xs font-bold uppercase tracking-wide"
+                  :class="io.preview.action === 'update' ? 'bg-emerald-700 text-white' : 'bg-amber-400 text-emerald-950'"
+                  x-text="io.preview.action === 'update' ? 'Úprava existujúceho' : 'Nový itinerár'"></span>
+            <p class="mt-2 text-lg font-bold text-stone-900" x-text="io.preview.itinerary.title"></p>
+            <p class="text-sm text-stone-600" x-show="io.preview.itinerary.subtitle" x-text="io.preview.itinerary.subtitle"></p>
+            <p class="mt-2 text-sm text-stone-700" x-text="previewStats"></p>
+            <p class="mt-1 text-sm text-stone-700" x-show="io.preview.action === 'update'">
+              <span class="text-stone-500" x-text="'Nahradí „' + io.preview.previousTitle + '“. '"></span>
+              <span x-text="io.preview.changes.length ? 'Zmení sa: ' + io.preview.changes.map(function (f) { return fieldLabels[f] || f; }).join(', ') : 'Bez zmien oproti uloženej verzii.'"></span>
+            </p>
+            <ul class="mt-3 space-y-1 text-sm">
+              <template x-for="(d, i) in io.preview.itinerary.days" :key="i">
+                <li class="flex gap-2"><span class="w-24 shrink-0 font-semibold text-stone-800" x-text="d.label"></span>
+                  <span class="truncate text-stone-500" x-text="d.activities.map(function (a) { return a.title; }).join(' · ') || 'bez aktivít'"></span></li>
+              </template>
+            </ul>
+            <div class="mt-4 flex flex-wrap gap-2">
+              <button type="button" @click="saveImport()" :disabled="io.busy" class="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" x-text="io.busy ? 'Ukladá sa…' : (io.preview.action === 'update' ? 'Uložiť zmeny' : 'Pridať itinerár')"></button>
+              <button type="button" @click="io.preview = null" class="rounded-lg px-4 py-2 text-sm text-stone-600 ring-1 ring-stone-200 hover:bg-white">Späť</button>
+            </div>
+          </div>
+        </template>
+      </div>
+      <p x-show="io.error" role="alert" class="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800" x-text="io.error"></p>
+    </div>
+  </dialog>
+
   <footer class="border-t border-stone-200 py-4 text-center text-xs text-stone-400">
     Agent ready: <a class="text-emerald-700 hover:underline" href="/api/v1/openapi.json">OpenAPI</a> ·
     <a class="text-emerald-700 hover:underline" href="/api/v1/itineraries">REST API</a> ·
@@ -341,6 +440,9 @@ function itineraryApp() {
     lastApp: (function () { try { return localStorage.getItem('nav_app') || ''; } catch (e) { return ''; } })(),
     loading: false,
     error: '',
+    notice: '',
+    io: { text: '', token: '', needToken: false, busy: false, error: '', preview: null, copyMessage: '' },
+    fieldLabels: { title: 'názov', subtitle: 'podnadpis', duration: 'dĺžka', targetAudience: 'pre koho', startLocation: 'štart', mapsUrl: 'odkaz na mapu', days: 'program dní', checklist: 'checklist' },
     routeStart: '', // start as last committed (blur/Enter); distances are measured from it, not from every keystroke
     legsByKey: {}, // legsKey → day legs answer { legs, places, complete }
 
@@ -589,6 +691,7 @@ function itineraryApp() {
         return;
       }
       this.canEdit = false;
+      this.notice = '';
       this.shareUrl = '';
       this.shareMessage = '';
       this.editingChecklist = false;
@@ -617,6 +720,83 @@ function itineraryApp() {
       this.dayIndex = 0;
       this.loadChecked();
       this.loadStart();
+    },
+
+    get exportUrl() {
+      return this.current ? '/api/v1/itineraries/' + encodeURIComponent(this.current.id) + '/export' : '';
+    },
+
+    get previewStats() {
+      var it = this.io.preview && this.io.preview.itinerary;
+      if (!it) return '';
+      var acts = it.days.reduce(function (n, d) { return n + d.activities.length; }, 0);
+      return it.days.length + (it.days.length === 1 ? ' deň' : it.days.length < 5 ? ' dni' : ' dní') + ' · ' +
+        acts + (acts === 1 ? ' aktivita' : acts > 1 && acts < 5 ? ' aktivity' : ' aktivít') + ' · ' +
+        it.checklist.length + ' v checkliste';
+    },
+
+    openIO: function () {
+      this.io.error = '';
+      this.io.copyMessage = '';
+      this.io.preview = null;
+      this.$refs.io.showModal();
+    },
+
+    // Copying suits phones, where the chat app is easier to paste into than to attach a file.
+    copyFile: async function (url) {
+      try {
+        var res = await fetch(url, { headers: { Accept: 'application/json' } });
+        if (!res.ok) throw new Error();
+        await navigator.clipboard.writeText(await res.text());
+        this.io.copyMessage = 'Skopírované. Vložte to do chatu s asistentom a napíšte, čo chcete.';
+      } catch (e) {
+        this.io.copyMessage = 'Kopírovanie zlyhalo, použite stiahnutie.';
+      }
+    },
+
+    readImportFile: async function (event) {
+      var file = event.target.files[0];
+      if (!file) return;
+      this.io.text = await file.text();
+      this.io.error = '';
+      event.target.value = '';
+    },
+
+    importRequest: async function (dryRun) {
+      var headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
+      if (this.io.token.trim()) headers.Authorization = 'Bearer ' + this.io.token.trim();
+      this.io.busy = true;
+      this.io.error = '';
+      try {
+        var res = await fetch('/api/v1/import' + (dryRun ? '?dryRun=true' : ''), { method: 'POST', headers: headers, body: this.io.text });
+        var body = await res.json().catch(function () { return {}; });
+        if (res.status === 401) {
+          this.io.error = this.io.needToken && this.io.token ? 'Token nemá právo zápisu.' : 'Na import zadajte API token s právom zápisu.';
+          this.io.needToken = true;
+          return null;
+        }
+        if (!res.ok) throw new Error(body.error || 'Chyba servera (' + res.status + ').');
+        return body;
+      } catch (e) {
+        this.io.error = 'Súbor sa nedá importovať: ' + (e.message || 'skúste znova.');
+        return null;
+      } finally { this.io.busy = false; }
+    },
+
+    checkImport: async function () {
+      this.io.preview = await this.importRequest(true);
+    },
+
+    saveImport: async function () {
+      var res = await this.importRequest(false);
+      if (!res) return;
+      cache.set(res.id, res.itinerary);
+      this.io.text = '';
+      this.io.preview = null;
+      this.$refs.io.close();
+      await this.refreshList();
+      await this.select(res.id);
+      this.notice = res.action === 'update' ? 'Itinerár „' + res.itinerary.title + '“ bol upravený.' : 'Itinerár „' + res.itinerary.title + '“ bol pridaný.';
     },
 
     refreshList: async function () {
