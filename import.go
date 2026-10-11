@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -173,7 +172,7 @@ func (a *API) importItinerary(text string, dryRun bool) (*ImportResult, error) {
 				return nil, err
 			}
 			if a.geo != nil {
-				go a.geo.Warm(it)
+				a.geo.Warm(it)
 			}
 		}
 	} else if dryRun {
@@ -231,10 +230,6 @@ func (a *API) importHandler(w http.ResponseWriter, r *http.Request) {
 	dryRun := r.URL.Query().Get("dryRun") == "true"
 	res, err := a.importItinerary(string(data), dryRun)
 	if err != nil {
-		if errors.Is(err, ErrExists) {
-			writeError(w, http.StatusConflict, err.Error())
-			return
-		}
 		writeErr(w, err)
 		return
 	}

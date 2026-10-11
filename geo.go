@@ -111,36 +111,29 @@ func NewGeo(path, userAgent string) *Geo {
 
 // Route measures the legs between [start, stops...]; start may be empty.
 func (g *Geo) Route(ctx context.Context, start string, stops []string) Route {
-	type pt struct {
-		name    string
-		persist bool
-	}
-	pts := make([]pt, 0, len(stops)+1)
+	places := stops
 	if start != "" {
-		pts = append(pts, pt{start, false})
+		places = append([]string{start}, stops...)
 	}
-	for _, s := range stops {
-		pts = append(pts, pt{s, true})
-	}
-	r := Route{Legs: []*Leg{}, Places: make([]string, len(pts)), Complete: true}
-	if len(pts) < 2 {
+	r := Route{Legs: []*Leg{}, Places: make([]string, len(places)), Complete: true}
+	if len(places) < 2 {
 		return r
 	}
-	found := make([]*point, len(pts))
-	for i, p := range pts {
+	found := make([]*point, len(places))
+	for i, place := range places {
 		var ok bool
-		if found[i], ok = g.locate(ctx, p.name, p.persist); !ok {
+		if found[i], ok = g.locate(ctx, place, i > 0 || start == ""); !ok {
 			r.Complete = false
 		}
 		if found[i] != nil {
 			r.Places[i] = found[i].Name
 		}
 	}
-	r.Legs = make([]*Leg, len(pts)-1)
+	r.Legs = make([]*Leg, len(places)-1)
 	for i := range r.Legs {
 		if found[i] != nil && found[i+1] != nil {
 			var ok bool
-			if r.Legs[i], ok = g.leg(ctx, *found[i], *found[i+1], pts[i].persist && pts[i+1].persist); !ok {
+			if r.Legs[i], ok = g.leg(ctx, *found[i], *found[i+1], i > 0 || start == ""); !ok {
 				r.Complete = false
 			}
 		}

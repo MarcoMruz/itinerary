@@ -69,6 +69,46 @@ test('changed route stops invalidate distances for the same itinerary and day', 
   assert.equal(app.legs.length, 0);
 });
 
+test('navigation preserves stop numbering, waypoints and encoded place names', () => {
+  const app = setup(async () => ({}));
+  app.current = { ...app.current, days: [{ activities: [
+    { place: 'Lake & park' }, {}, { place: 'Lake & park' }, { place: 'Town square' },
+  ] }] };
+  assert.equal(JSON.stringify(app.dayRoute), JSON.stringify({
+    stops: ['Lake & park', 'Town square'], nums: [1, 0, 1, 2], first: [true, false, false, true],
+  }));
+  app.nav = { stops: app.dayRoute.stops, origin: 'My hotel', title: 'Route' };
+  const [google, apple, waze] = app.navApps;
+  assert.equal(new URL(google.url).searchParams.get('origin'), 'My hotel');
+  assert.equal(new URL(google.url).searchParams.get('waypoints'), 'Lake & park');
+  assert.deepEqual(new URL(apple.url).searchParams.getAll('waypoint'), ['Lake & park']);
+  assert.equal(new URL(apple.url).searchParams.get('source'), 'My hotel');
+  assert.equal(new URL(apple.url).searchParams.get('destination'), 'Town square');
+  assert.equal(new URL(waze.url).searchParams.get('q'), 'Lake & park');
+  assert.equal(new URL(waze.more[0].url).searchParams.get('q'), 'Town square');
+  assert.equal(apple.url.includes('+'), false);
+});
+
+test('import save refreshes and selects the saved itinerary', async () => {
+  const saved = { id: 'imported', title: 'Imported', days: [], checklist: ['Water'] };
+  const app = setup(async url => ({ ok: true, json: async () => {
+    if (url === '/api/v1/import') return { id: saved.id, itinerary: saved, action: 'create' };
+    if (url === '/api/v1/itineraries') return [{ id: saved.id, title: saved.title }];
+    if (url.endsWith('/checklist-access')) return { canEdit: false };
+    return saved;
+  } }));
+  let closed = false;
+  app.$refs = { io: { close() { closed = true; } } };
+  app.io.text = '{}';
+  await app.saveImport();
+  assert.equal(app.current.id, 'imported');
+  assert.equal(app.list[0].id, 'imported');
+  assert.equal(app.io.text, '');
+  assert.equal(app.io.preview, null);
+  assert.equal(closed, true);
+  assert.match(app.notice, /Imported/);
+});
+
 test('owner share copies the link with a manual fallback', async () => {
   let copied;
   const app = setup(async () => ({ ok: true, json: async () => ({ url: 'https://example.com/#trip~key' }) }), {

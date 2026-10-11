@@ -1,5 +1,9 @@
 .git
+.omc
+itinerary
+app
 *.md
 *_test.go
+*_test.cjs
 Dockerfile
 .dockerignore

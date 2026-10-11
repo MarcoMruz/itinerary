@@ -49,6 +49,11 @@ func TestStoreFailedMutationsPreserveSnapshot(t *testing.T) {
 	if err := store.Delete(original.ID); err == nil {
 		t.Fatal("expected delete persistence failure")
 	}
+	replacement := cloneItinerary(original)
+	replacement.Title = "Replacement"
+	if err := store.Replace(replacement); err == nil {
+		t.Fatal("expected replacement persistence failure")
+	}
 	after, ok := store.Get(original.ID)
 	if !ok || !reflect.DeepEqual(original, after) || !reflect.DeepEqual(before, store.List()) {
 		t.Fatal("failed write changed stored data or order")
