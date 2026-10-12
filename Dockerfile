@@ -3,9 +3,6 @@
 # volume at /root/data so itineraries added via API/MCP survive redeploys.
 FROM golang:1.22-alpine AS builder
 WORKDIR /app
-COPY go.mod ./
-# COPY go.sum ./   # no third-party dependencies
-RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o app .
 

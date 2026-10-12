@@ -39,8 +39,7 @@ func (d Day) RouteStops() []string {
 	return stops
 }
 
-// Itinerary is the aggregate root. Once stored it is treated as immutable,
-// so the store can hand out pointers to concurrent readers safely.
+// Stored itineraries are immutable; the store returns independent copies.
 type Itinerary struct {
 	ID             string   `json:"id"`
 	Title          string   `json:"title"`

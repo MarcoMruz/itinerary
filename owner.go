@@ -31,7 +31,10 @@ func (s *Store) revokeShareKey(id string) error {
 func (s *Store) itineraryKey(file, id string, create, remove bool) (string, error) {
 	s.wmu.Lock()
 	defer s.wmu.Unlock()
-	if _, ok := s.Get(id); !ok {
+	s.mu.RLock()
+	_, ok := s.items[id]
+	s.mu.RUnlock()
+	if !ok {
 		return "", ErrNotFound
 	}
 	path := filepath.Join(filepath.Dir(s.path), file)
@@ -84,9 +87,8 @@ func (a *API) ownerSession(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Key string `json:"key"`
 	}
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
-	if err := dec.Decode(&input); err != nil {
-		writeError(w, 400, "invalid key")
+	if err := decodeJSON(http.MaxBytesReader(w, r.Body, 1024), &input); err != nil {
+		writeErr(w, err)
 		return
 	}
 	key, err := a.store.ownerKey(r.PathValue("id"), false)
@@ -98,26 +100,25 @@ func (a *API) ownerSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, schema{"canEdit": true})
 }
 
-func (a *API) hasOwnerSession(r *http.Request) bool {
+func (a *API) ownerSessionKey(r *http.Request) string {
 	cookie, err := r.Cookie("itinerary_owner")
 	if err != nil {
-		return false
+		return ""
 	}
 	key, err := a.store.ownerKey(r.PathValue("id"), false)
-	return err == nil && key != "" && subtle.ConstantTimeCompare([]byte(key), []byte(cookie.Value)) == 1
+	if err != nil || key == "" || subtle.ConstantTimeCompare([]byte(key), []byte(cookie.Value)) != 1 {
+		return ""
+	}
+	return key
 }
 
 func (a *API) checklistAccess(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, schema{"canEdit": a.hasOwnerSession(r)})
+	writeJSON(w, 200, schema{"canEdit": a.ownerSessionKey(r) != ""})
 }
 
 func (a *API) shareChecklist(w http.ResponseWriter, r *http.Request) {
-	if !a.hasOwnerSession(r) {
-		writeError(w, http.StatusUnauthorized, "owner link required")
-		return
-	}
-	key, err := a.store.ownerKey(r.PathValue("id"), false)
-	if err != nil || key == "" {
+	key := a.ownerSessionKey(r)
+	if key == "" {
 		writeError(w, http.StatusUnauthorized, "owner link required")
 		return
 	}
@@ -132,20 +133,18 @@ func (a *API) editChecklist(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if !a.hasOwnerSession(r) {
+	if a.ownerSessionKey(r) == "" {
 		writeError(w, 401, "owner link required")
 		return
 	}
 	var input struct {
 		Checklist *[]string `json:"checklist"`
 	}
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&input); err != nil {
-		writeError(w, 400, "invalid checklist")
+	if err := decodeJSON(http.MaxBytesReader(w, r.Body, maxBodyBytes), &input); err != nil {
+		writeErr(w, err)
 		return
 	}
-	if err := requireJSONEOF(dec); err != nil || input.Checklist == nil {
+	if input.Checklist == nil {
 		writeError(w, 400, "checklist is required")
 		return
 	}

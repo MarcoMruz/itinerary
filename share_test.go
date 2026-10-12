@@ -69,9 +69,14 @@ func TestShareLinkOpensOneItineraryReadOnly(t *testing.T) {
 }
 
 func TestShareLinkMCPTool(t *testing.T) {
-	srv, _ := newTestServer(t, "write")
-	call := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_share_link","arguments":{"id":"slovensky-raj-1yo"}}}`
-	if _, b := do(t, "POST", srv.URL+"/mcp", call, "Authorization", "Bearer write"); !strings.Contains(string(b), "/s/slovensky-raj-1yo/") {
-		t.Fatalf("MCP get_share_link: %s", b)
+	srv, _ := newTestServerWith(t, API{token: "write", readToken: "read"}, SecurityConfig{})
+	for name, path := range map[string]string{"get_share_link": "/s/slovensky-raj-1yo/", "get_owner_link": "/#slovensky-raj-1yo~"} {
+		call := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"` + name + `","arguments":{"id":"slovensky-raj-1yo"}}}`
+		if _, b := do(t, "POST", srv.URL+"/mcp", call, "Authorization", "Bearer write"); !strings.Contains(string(b), path) {
+			t.Fatalf("MCP %s: %s", name, b)
+		}
+		if _, b := do(t, "POST", srv.URL+"/mcp", call, "Authorization", "Bearer read"); !strings.Contains(string(b), "unauthorized: "+name+" requires write access") || strings.Contains(string(b), path) {
+			t.Fatalf("MCP %s with read token: %s", name, b)
+		}
 	}
 }

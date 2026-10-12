@@ -319,6 +319,14 @@ func TestDecodeRejectsTrailingJSON(t *testing.T) {
 	}
 }
 
+func TestCreateRejectsOversizedTrailingData(t *testing.T) {
+	srv, _ := newTestServer(t, "")
+	body := sampleItinerary + strings.Repeat(" ", maxBodyBytes)
+	if status, body := do(t, "POST", srv.URL+"/api/v1/itineraries", body); status != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d: %s", status, body)
+	}
+}
+
 func TestOpenStoreRejectsNullItinerary(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "itineraries.json")
 	if err := os.WriteFile(path, []byte("[null]"), 0o644); err != nil {

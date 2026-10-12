@@ -161,3 +161,27 @@ func TestUpdateDiscovery(t *testing.T) {
 		t.Fatal("PATCH missing from CORS methods")
 	}
 }
+
+func TestUpdateReplacesDaysWithoutRetainingOldFields(t *testing.T) {
+	srv, _ := newTestServer(t, "")
+	status, body := do(t, "PATCH", srv.URL+"/api/v1/itineraries/slovensky-raj-1yo", `{"days":[{"activities":[{"title":"New activity"}]}]}`)
+	if status != 200 {
+		t.Fatalf("update: %d %s", status, body)
+	}
+	var updated Itinerary
+	if err := json.Unmarshal(body, &updated); err != nil {
+		t.Fatal(err)
+	}
+	want := []Day{{Label: "Deň 1", Activities: []Activity{{Title: "New activity"}}}}
+	if !reflect.DeepEqual(updated.Days, want) {
+		t.Fatalf("old day fields retained: %+v", updated.Days)
+	}
+}
+
+func TestUpdateNullChecklistItemDoesNotRetainOldText(t *testing.T) {
+	srv, _ := newTestServer(t, "")
+	status, body := do(t, "PATCH", srv.URL+"/api/v1/itineraries/slovensky-raj-1yo", `{"checklist":[null]}`)
+	if status != 200 || !strings.Contains(string(body), `"checklist":[]`) {
+		t.Fatalf("old checklist text retained: %d %s", status, body)
+	}
+}

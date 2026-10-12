@@ -57,7 +57,7 @@ func (a *API) addItinerary(it *Itinerary) error {
 	for n := 2; ; n++ {
 		err := a.store.Create(it)
 		if err == nil && a.geo != nil {
-			go a.geo.Warm(it)
+			a.geo.Warm(it)
 		}
 		if !derived || !errors.Is(err, ErrExists) || n > maxIDSuffixTry {
 			return err
@@ -67,18 +67,9 @@ func (a *API) addItinerary(it *Itinerary) error {
 }
 
 func decodeItinerary(r io.Reader) (*Itinerary, error) {
-	dec := json.NewDecoder(r)
-	dec.DisallowUnknownFields() // surface agent typos ("name" vs "title") instead of dropping data
 	var it Itinerary
-	if err := dec.Decode(&it); err != nil {
-		var tooBig *http.MaxBytesError
-		if errors.As(err, &tooBig) {
-			return nil, err
-		}
-		return nil, invalid("invalid JSON: %v", err)
-	}
-	if err := requireJSONEOF(dec); err != nil {
-		return nil, invalid("invalid JSON: %v", err)
+	if err := decodeJSON(r, &it); err != nil {
+		return nil, err
 	}
 	return &it, nil
 }
@@ -90,7 +81,7 @@ func (a *API) updateItinerary(id string, changes map[string]json.RawMessage) (*I
 	it, err := a.store.Update(id, changes)
 	if err == nil && a.geo != nil {
 		if _, changed := changes["days"]; changed {
-			go a.geo.Warm(it)
+			a.geo.Warm(it)
 		}
 	}
 	return it, err
@@ -168,14 +159,7 @@ func (a *API) challenge(w http.ResponseWriter) {
 }
 
 func (a *API) requireToken(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if !a.authorized(r) {
-			a.challenge(w)
-			writeError(w, http.StatusUnauthorized, "missing or invalid bearer token")
-			return
-		}
-		next(w, r)
-	}
+	return a.requireAccess(a.authorized, next)
 }
 
 func (a *API) requireReadToken(next http.HandlerFunc) http.HandlerFunc {
@@ -186,8 +170,12 @@ func (a *API) requireReadToken(next http.HandlerFunc) http.HandlerFunc {
 func (a *API) requireUIRead(next http.HandlerFunc) http.HandlerFunc { return a.requireRead(true, next) }
 
 func (a *API) requireRead(withSession bool, next http.HandlerFunc) http.HandlerFunc {
+	return a.requireAccess(func(r *http.Request) bool { return a.canRead(r, withSession) }, next)
+}
+
+func (a *API) requireAccess(allowed func(*http.Request) bool, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !a.canRead(r, withSession) {
+		if !allowed(r) {
 			a.challenge(w)
 			writeError(w, http.StatusUnauthorized, "missing or invalid bearer token")
 			return
@@ -234,16 +222,7 @@ func (a *API) deleteItinerary(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) patchItinerary(w http.ResponseWriter, r *http.Request) {
 	var changes map[string]json.RawMessage
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
-	err := dec.Decode(&changes)
-	if err == nil {
-		err = requireJSONEOF(dec)
-	}
-	if err != nil {
-		var tooBig *http.MaxBytesError
-		if !errors.As(err, &tooBig) {
-			err = invalid("invalid JSON: %v", err)
-		}
+	if err := decodeJSON(http.MaxBytesReader(w, r.Body, maxBodyBytes), &changes); err != nil {
 		writeErr(w, err)
 		return
 	}
@@ -343,12 +322,13 @@ func (a *API) openAPI(w http.ResponseWriter, r *http.Request) {
 	errResp := func(desc string) schema { return resp(desc, ref("Error")) }
 	idParam := []schema{{"name": "id", "in": "path", "required": true, "schema": schema{"type": "string"}}}
 
-	withBearer := func(op schema) schema {
-		op["security"] = []schema{{"bearerAuth": []string{}}}
-		op["responses"].(schema)["401"] = errResp("Unauthorized")
+	secured := func(op schema) schema {
+		if a.readsProtected() {
+			op["security"] = []schema{{"bearerAuth": []string{}}}
+			op["responses"].(schema)["401"] = errResp("Unauthorized")
+		}
 		return op
 	}
-	secured, readSecured := func(op schema) schema { return op }, func(op schema) schema { return op }
 	components := schema{
 		"schemas": schema{
 			"Summary": schema{"type": "object", "properties": schema{
@@ -362,10 +342,6 @@ func (a *API) openAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.readsProtected() {
 		components["securitySchemes"] = schema{"bearerAuth": schema{"type": "http", "scheme": "bearer"}}
-		readSecured = withBearer
-	}
-	if a.readsProtected() {
-		secured = withBearer
 	}
 
 	doc := schema{
@@ -385,7 +361,7 @@ func (a *API) openAPI(w http.ResponseWriter, r *http.Request) {
 				}),
 			},
 			"/api/v1/itineraries": schema{
-				"get": readSecured(schema{
+				"get": secured(schema{
 					"operationId": "listItineraries", "summary": "List all itineraries",
 					"responses": schema{"200": resp("Itinerary summaries", schema{"type": "array", "items": ref("Summary")})},
 				}),
@@ -404,7 +380,7 @@ func (a *API) openAPI(w http.ResponseWriter, r *http.Request) {
 					"requestBody": schema{"required": true, "content": jsonBody(ref("ItineraryUpdate"))},
 					"responses":   schema{"200": resp("Updated itinerary", ref("Itinerary")), "400": errResp("Validation error"), "404": errResp("Not found"), "413": errResp("Request body too large")},
 				}),
-				"get": readSecured(schema{
+				"get": secured(schema{
 					"operationId": "getItinerary", "summary": "Get itinerary detail incl. days and checklist", "parameters": idParam,
 					"responses": schema{"200": resp("Itinerary", ref("Itinerary")), "404": errResp("Not found")},
 				}),
@@ -469,7 +445,7 @@ func (a *API) dispatch(r *http.Request, req rpcRequest) (any, *rpcError) {
 			ClientInfo      any                        `json:"clientInfo"`
 			Meta            map[string]json.RawMessage `json:"_meta,omitempty"`
 		}
-		if err := decodeParams(req.Params, &p); err != nil {
+		if err := decodeRaw(req.Params, &p); len(req.Params) > 0 && err != nil {
 			return nil, &rpcError{rpcInvalidParams, err.Error()}
 		}
 		version := mcpVersions[len(mcpVersions)-1]
@@ -506,9 +482,9 @@ func (a *API) callTool(r *http.Request, raw json.RawMessage) (any, *rpcError) {
 		return nil, &rpcError{rpcInvalidParams, "tool name is required"}
 	}
 	switch p.Name {
-	case "get_owner_link":
+	case "get_owner_link", "get_share_link":
 		if !a.authorized(r) {
-			return toolError("unauthorized: get_owner_link requires write access"), nil
+			return toolError("unauthorized: " + p.Name + " requires write access"), nil
 		}
 		var args struct {
 			ID string `json:"id"`
@@ -516,26 +492,17 @@ func (a *API) callTool(r *http.Request, raw json.RawMessage) (any, *rpcError) {
 		if err := decodeRaw(p.Arguments, &args); err != nil {
 			return nil, &rpcError{rpcInvalidParams, "invalid arguments: " + err.Error()}
 		}
-		key, err := a.store.ownerKey(args.ID, true)
+		keyFor := a.store.ownerKey
+		link := func(id, key string) string { return a.baseURL(r) + "/#" + id + "~" + key }
+		if p.Name == "get_share_link" {
+			keyFor = a.store.shareKey
+			link = func(id, key string) string { return a.shareURL(r, id, key) }
+		}
+		key, err := keyFor(args.ID, true)
 		if err != nil {
 			return toolError(err.Error()), nil
 		}
-		return toolJSON(schema{"url": a.baseURL(r) + "/#" + args.ID + "~" + key}), nil
-	case "get_share_link":
-		if !a.authorized(r) {
-			return toolError("unauthorized: get_share_link requires write access"), nil
-		}
-		var args struct {
-			ID string `json:"id"`
-		}
-		if err := decodeRaw(p.Arguments, &args); err != nil {
-			return nil, &rpcError{rpcInvalidParams, "invalid arguments: " + err.Error()}
-		}
-		key, err := a.store.shareKey(args.ID, true)
-		if err != nil {
-			return toolError(err.Error()), nil
-		}
-		return toolJSON(schema{"url": a.shareURL(r, args.ID, key)}), nil
+		return toolJSON(schema{"url": link(args.ID, key)}), nil
 	case "update_itinerary":
 		if !a.authorized(r) {
 			return toolError("unauthorized: update_itinerary requires 'Authorization: Bearer <API_TOKEN>'"), nil
@@ -586,23 +553,28 @@ func (a *API) callTool(r *http.Request, raw json.RawMessage) (any, *rpcError) {
 	}
 }
 
-func decodeParams(raw json.RawMessage, dst any) error {
-	if len(raw) == 0 {
-		return nil
-	}
-	return decodeRaw(raw, dst)
-}
-
 func decodeRaw(raw json.RawMessage, dst any) error {
 	if len(raw) == 0 {
 		return errors.New("object is required")
 	}
-	dec := json.NewDecoder(bytes.NewReader(raw))
+	return decodeJSON(bytes.NewReader(raw), dst)
+}
+
+func decodeJSON(r io.Reader, dst any) error {
+	dec := json.NewDecoder(r)
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(dst); err != nil {
+	err := dec.Decode(dst)
+	if err == nil {
+		err = requireJSONEOF(dec)
+	}
+	if err != nil {
+		var tooBig *http.MaxBytesError
+		if !errors.As(err, &tooBig) {
+			return invalid("invalid JSON: %v", err)
+		}
 		return err
 	}
-	return requireJSONEOF(dec)
+	return nil
 }
 
 func toolJSON(v any) mcpToolResult {
