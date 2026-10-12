@@ -1,0 +1,47 @@
+{{define "insight-page"}}
+<article class="mx-auto max-w-3xl" aria-label="Rady od miestnych">
+  <button type="button" @click="closePage()"
+          class="-ml-2 inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
+    ← Späť na program
+  </button>
+  <header class="mt-3">
+    <p class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-amber-700">
+      {{template "insider-icon"}}<span x-text="page.eyebrow"></span>
+    </p>
+    <h2 class="mt-1 text-2xl font-bold text-stone-900 sm:text-3xl" x-text="page.title"></h2>
+    <p x-show="page.summary" class="mt-3 text-lg text-stone-700" x-text="page.summary"></p>
+  </header>
+  <div class="mt-5 flex flex-wrap gap-2" x-show="page.bestTime || page.place">
+    <p x-show="page.bestTime" class="flex items-start gap-2 rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-900 ring-1 ring-emerald-200">
+      <svg class="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path stroke-linecap="round" d="M12 7v5l3 2"/></svg>
+      <span><span class="font-semibold">Kedy ísť: </span><span x-text="page.bestTime"></span></span>
+    </p>
+    <button type="button" x-show="page.place" @click="openNav(page.title, [page.place], '')"
+            class="inline-flex items-center gap-1 rounded-xl px-3 py-2 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+      Navigovať ↗
+    </button>
+  </div>
+  <template x-for="section in page.sections" :key="section.key">
+    <section class="mt-6 rounded-2xl bg-white p-4 shadow-sm ring-1 sm:p-5" :class="section.key === 'avoid' ? 'ring-red-200' : 'ring-stone-200'">
+      <h3 class="font-bold" :class="section.key === 'avoid' ? 'text-red-800' : 'text-stone-900'" x-text="section.title"></h3>
+      <ul class="mt-3 space-y-2.5">
+        <template x-for="(item, i) in section.items" :key="i">
+          <li class="flex gap-2.5 text-stone-700">
+            <span class="mt-2 h-1.5 w-1.5 shrink-0 rounded-full" :class="section.key === 'avoid' ? 'bg-red-400' : 'bg-emerald-500'" aria-hidden="true"></span>
+            <span x-text="item"></span>
+          </li>
+        </template>
+      </ul>
+    </section>
+  </template>
+  <section x-show="page.sources.length" class="mt-6">
+    <h3 class="text-xs font-semibold uppercase tracking-wide text-stone-500">Zdroje</h3>
+    <ul class="mt-2 flex flex-wrap gap-2 text-sm">
+      <template x-for="(url, i) in page.sources" :key="i">
+        <li><a :href="url" target="_blank" rel="noopener noreferrer" class="text-emerald-700 hover:underline" x-text="hostname(url) + ' ↗'"></a></li>
+      </template>
+    </ul>
+  </section>
+  <p class="mt-6 text-xs text-stone-400">Rady pripravil AI asistent z verejných zdrojov. Ceny a otváracie hodiny si pred cestou overte.</p>
+</article>
+{{end}}

@@ -48,6 +48,11 @@
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 20l-5.4-2.7A1 1 0 013 16.4V5.6a1 1 0 011.4-.9L9 7m0 13l6-3m-6 3V7m6 10l4.6 2.3a1 1 0 001.4-.9V7.6a1 1 0 00-.6-.9L15 4m0 13V4m0 0L9 7"/></svg>
             Celá trasa v Mapách
           </a>
+          <button type="button" x-show="hasGuide" @click="openGuide()"
+                  class="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-4 py-1.5 font-semibold text-white hover:bg-white/25 focus:outline-none focus:ring-2 focus:ring-amber-300">
+            {{template "insider-icon"}}
+            Miestny sprievodca
+          </button>
         </div>
       </div>
     </template>

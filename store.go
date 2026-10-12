@@ -131,6 +131,9 @@ func (s *Store) Update(id string, changes map[string]json.RawMessage) (*Itinerar
 		if _, changed := changes["checklist"]; changed {
 			next.Checklist = nil
 		}
+		if _, changed := changes["localGuide"]; changed {
+			next.LocalGuide = nil
+		}
 		if err := decodeRaw(data, next); err != nil {
 			return nil, invalid("invalid changes: %v", err)
 		}
@@ -235,6 +238,18 @@ func cloneItinerary(it *Itinerary) *Itinerary {
 	copy.Days = slices.Clone(it.Days)
 	for i := range copy.Days {
 		copy.Days[i].Activities = slices.Clone(it.Days[i].Activities)
+		for j, a := range copy.Days[i].Activities {
+			if a.Insight != nil {
+				in := *a.Insight
+				in.Tips, in.Avoid, in.Sources = slices.Clone(in.Tips), slices.Clone(in.Avoid), slices.Clone(in.Sources)
+				copy.Days[i].Activities[j].Insight = &in
+			}
+		}
+	}
+	if it.LocalGuide != nil {
+		g := *it.LocalGuide
+		g.GettingAround, g.Tips, g.Avoid, g.Sources = slices.Clone(g.GettingAround), slices.Clone(g.Tips), slices.Clone(g.Avoid), slices.Clone(g.Sources)
+		copy.LocalGuide = &g
 	}
 	return &copy
 }

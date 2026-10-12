@@ -16,7 +16,7 @@ docker build -t itinerary . && docker run -p 9876:9876 -v itinerary-data:/root/d
 
 - `templates/index.html` composes the page from `templates/components/` (header, day route, timeline, checklist, dialogs, footer).
 - `static/app.mjs` owns itinerary selection and coordinates the feature modules in `static/features/`.
-- `static/domain/` holds pure route, checklist, and import/export rules, independent of Alpine and browser APIs.
+- `static/domain/` holds pure route, checklist, import/export and insider-tip rules, independent of Alpine and browser APIs.
 - `static/bootstrap.mjs` restores private links and starts Alpine after registering the app.
 
 Templates and modules are embedded in the Go binary. Native JavaScript modules need no bundler or npm dependencies. Run frontend tests with Node.js 18+.
@@ -114,6 +114,18 @@ also wrapped in a ```` ```json ```` block or surrounded by text. `update` replac
 (omitted fields are cleared, unlike `PATCH`); `create` adds a new one; without an action an existing id means update.
 Importing needs write access: `API_TOKEN` as a bearer token (the dialog asks for it), or a Google sign-in
 on the page itself (same-origin requests only).
+
+## Local insider tips
+
+Tick **Pridať rady od miestneho** in the Import / Export dialog before exporting or copying. The file then asks the assistant
+to act as a local, research the destination in depth and fill in (`?insider=true` on the export and template URLs):
+
+- `insight` on each activity: `summary`, `bestTime`, `tips`, `avoid`, `sources`. The summary shows on the timeline card;
+  the rest opens on its own page (`#<id>/d/<day>/<activity>`).
+- `localGuide` on the itinerary: `summary`, `gettingAround`, `tips`, `avoid`, `sources`, opened from **Miestny sprievodca**
+  or **Ako sa tu pohybovať** (`#<id>/guide`).
+
+Lists hold at most 15 items, sources at most 10 http(s) links. Blank insights are dropped; `PATCH` with `{"localGuide":{}}` clears the guide.
 
 ## Read-only share links
 

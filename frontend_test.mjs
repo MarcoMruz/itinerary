@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { itineraryApp } from './static/app.mjs';
 import { checklistChanges, checklistProgress } from './static/domain/checklist.mjs';
 import { activityRoute, fmtLeg, totalLegs } from './static/domain/routes.mjs';
+import { chatMessage, exportUrl, previewStats } from './static/domain/import-export.mjs';
+import { hostname, insightPage, parseHash, viewHash } from './static/domain/insights.mjs';
 
 const globalNames = ['localStorage', 'fetch', 'navigator', 'window', 'location', 'history'];
 const originalGlobals = Object.fromEntries(globalNames.map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
@@ -246,4 +248,82 @@ test('share link is created, copied and revoked', async () => {
   assert.deepEqual(calls, ['POST /api/v1/itineraries/trip/share-link', 'DELETE /api/v1/itineraries/trip/share-link']);
   assert.equal(app.sharing.url, '');
   assert.equal(app.sharing.revoked, true);
+});
+
+const insightTrip = Object.freeze({
+  id: 'trip', title: 'Trip', checklist: [],
+  localGuide: { summary: 'Locals walk', gettingAround: ['Day pass 5 €'], avoid: [], sources: ['https://www.example.com/a'] },
+  days: [{ label: 'Sobota', activities: [
+    { time: '09:00', title: 'Lake', place: 'Lake', insight: { summary: 'Come early', bestTime: 'Before 9', tips: ['North lot'], avoid: ['Boat rental'] } },
+    { time: '12:00', title: 'Lunch' },
+  ] }],
+});
+
+test('insight hash round-trips views and keeps owner keys', () => {
+  assert.deepEqual(parseHash('#trip'), { id: 'trip', key: '', view: null });
+  assert.deepEqual(parseHash('#trip~secret'), { id: 'trip', key: 'secret', view: null });
+  assert.deepEqual(parseHash('#trip/guide').view, { id: 'trip', type: 'guide' });
+  assert.deepEqual(parseHash('#trip/d/1/x').view, null);
+  const place = { id: 'trip', type: 'place', day: 2, activity: 3 };
+  assert.equal(viewHash(place), '#trip/d/2/3');
+  assert.deepEqual(parseHash(viewHash(place)).view, place);
+});
+
+test('insight pages expose only filled sections and reject stale views', () => {
+  const place = insightPage(insightTrip, { id: 'trip', type: 'place', day: 0, activity: 0 });
+  assert.equal(place.eyebrow, 'Sobota · 09:00');
+  assert.deepEqual(place.sections.map(section => section.key), ['tips', 'avoid']);
+  assert.equal(place.place, 'Lake');
+  const guide = insightPage(insightTrip, { id: 'trip', type: 'guide' });
+  assert.deepEqual(guide.sections.map(section => section.title), ['Ako sa pohybovať']);
+  assert.equal(insightPage(insightTrip, { id: 'other', type: 'guide' }), null);
+  assert.equal(insightPage(insightTrip, { id: 'trip', type: 'place', day: 0, activity: 1 }), null);
+  assert.equal(insightPage(insightTrip, { id: 'trip', type: 'place', day: 5, activity: 0 }), null);
+  assert.equal(hostname('https://www.example.com/a'), 'example.com');
+  assert.equal(previewStats(insightTrip), '1 deň · 2 aktivity · 0 v checkliste · tipy od miestnych: 1 · miestny sprievodca');
+});
+
+test('insider toggle changes export links and the chat request', () => {
+  assert.equal(exportUrl('/x/export', false), '/x/export');
+  assert.equal(exportUrl('/x/export', true), '/x/export?insider=true');
+  assert.ok(!chatMessage('Uprav', 'update', '{}').includes('miestny sprievodca'));
+  const message = chatMessage('Uprav', 'update', '{}', true);
+  assert.ok(message.startsWith('Uprav\n\nBuď náš miestny sprievodca'));
+  const app = setup(async () => ({}));
+  app.io.insider = true;
+  assert.equal(app.exportUrl, '/api/v1/itineraries/trip/export?insider=true');
+  assert.equal(app.templateUrl, '/api/v1/import/template?insider=true');
+});
+
+test('opening a tip page from the hash selects its day and closing returns to the program', () => {
+  const app = setup(async () => ({}));
+  app.current = insightTrip;
+  location.hash = '#trip/d/0/0';
+  globalThis.window.scrollTo = () => {};
+  app.$nextTick = callback => callback();
+  app.openFromHash();
+  assert.equal(app.page.title, 'Lake');
+  assert.equal(app.dayIndex, 0);
+  let replaced;
+  history.replaceState = (state, title, url) => { replaced = url; };
+  app.closePage();
+  assert.equal(app.page, null);
+  assert.equal(replaced, '#trip');
+});
+
+test('a stale tip link falls back to the program without changing the day', () => {
+  const app = setup(async () => ({}));
+  app.current = insightTrip;
+  globalThis.window.scrollTo = () => {};
+  app.$nextTick = callback => callback();
+  let replaced;
+  history.replaceState = (state, title, url) => { replaced = url; };
+  location.hash = '#trip/d/9/0';
+  app.openFromHash();
+  assert.equal(app.page, null);
+  assert.equal(app.dayIndex, 0);
+  assert.equal(replaced, '#trip');
+  location.hash = '#trip/guide';
+  app.openGuide();
+  assert.equal(app.pagesOpened, 0);
 });

@@ -456,7 +456,7 @@ func (a *API) dispatch(r *http.Request, req rpcRequest) (any, *rpcError) {
 			"protocolVersion": version,
 			"capabilities":    schema{"tools": schema{"listChanged": false}},
 			"serverInfo":      schema{"name": appName, "version": appVersion},
-			"instructions":    "Family travel itineraries. Use list_itineraries to discover ids, get_itinerary_detail for days/activities/checklist, add_itinerary to create one, and update_itinerary to edit supplied fields of an existing itinerary. Updates preserve omitted fields and replace supplied arrays in full. Give each activity place and the startLocation as an official map name or street address, so driving distances can be computed.",
+			"instructions":    "Family travel itineraries. Use list_itineraries to discover ids, get_itinerary_detail for days/activities/checklist, add_itinerary to create one, and update_itinerary to edit supplied fields of an existing itinerary. Updates preserve omitted fields and replace supplied arrays in full. Give each activity place and the startLocation as an official map name or street address, so driving distances can be computed. Optional activity insight and itinerary localGuide hold researched local know-how (tips, what to avoid, getting around) shown on separate pages.",
 		}, nil
 	case "ping":
 		return schema{}, nil

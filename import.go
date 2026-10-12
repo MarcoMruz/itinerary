@@ -28,6 +28,33 @@ You are helping the user create or edit it. Follow these rules exactly:
 7. For a template, replace every example value with real content for the user's trip.
 After the user uploads your file in the app (Import), the app shows a preview and saves it.`
 
+// insiderInstructions turn the assistant into a local who plans the trip
+// personally and researches what mainstream guides miss.
+const insiderInstructions = `LOCAL INSIDER MODE (the user switched it on):
+Act as a friend who has lived at the destination for years and plans this trip personally for these travellers ("targetAudience").
+Research deeply before writing: browse the web if you can, prefer local-language sources, local forums, recent reviews, official transport and venue sites over generic guidebooks.
+8. For every activity with a "place", add "insight": "summary" (one line, the single most useful thing to know), "bestTime" (when to arrive and why), "tips" (2-5 concrete tips a tourist would not know: best entrance, where to park, what to order, a hidden spot nearby, how to skip the queue, what is free), "avoid" (tourist traps, scams, overpriced spots, closures, crowd peaks) and "sources" (http(s) links you used).
+9. Add "localGuide" for the whole trip: "summary", "gettingAround" (how locals move: transport, tickets and apps, parking rules, tolls and vignettes, taxis vs ride-hailing, walking distances, strollers and kids if relevant), "tips" (customs, tipping, opening hours, payment, local food, events during the trip), "avoid" and "sources".
+10. Be specific: names, prices with currency, times, days. No generic advice like "wear comfortable shoes". Never invent places, prices or links; if something may be outdated, say so in the tip.
+11. If your research shows a better place, time or order for an activity, change the plan and say why in that activity's insight summary.
+12. Keep each text under 500 characters and each list under 15 items. Write in the itinerary's language.`
+
+var templateInsight = schema{
+	"summary":  "Najdôležitejšia vec, ktorú vedia len miestni",
+	"bestTime": "Kedy prísť a prečo",
+	"tips":     []string{"Konkrétny tip od miestneho"},
+	"avoid":    []string{"Čomu sa vyhnúť"},
+	"sources":  []string{"https://example.com/zdroj"},
+}
+
+var templateLocalGuide = schema{
+	"summary":       "Čo by vám miestny povedal ako prvé",
+	"gettingAround": []string{"Ako sa tu pohybovať: doprava, lístky, parkovanie"},
+	"tips":          []string{"Miestne zvyky, otváracie hodiny, platby"},
+	"avoid":         []string{"Chyby, ktoré robia turisti"},
+	"sources":       []string{"https://example.com/zdroj"},
+}
+
 var templateItinerary = schema{
 	"title":          "Názov výletu",
 	"subtitle":       "Krátky popis, napr. Predĺžený víkend s deťmi",
@@ -43,12 +70,38 @@ var templateItinerary = schema{
 	"checklist": []string{"Položka na zbalenie"},
 }
 
-func exportDocument(action string, itinerary any) schema {
+// insiderTemplate adds example insights so the assistant sees where they go.
+func insiderTemplate() schema {
+	t := schema{}
+	for k, v := range templateItinerary {
+		t[k] = v
+	}
+	days := templateItinerary["days"].([]schema)
+	activities := days[0]["activities"].([]schema)
+	withInsight := make([]schema, len(activities))
+	for i, a := range activities {
+		withInsight[i] = schema{"insight": templateInsight}
+		for k, v := range a {
+			withInsight[i][k] = v
+		}
+	}
+	t["days"] = []schema{{"label": days[0]["label"], "activities": withInsight}}
+	t["localGuide"] = templateLocalGuide
+	return t
+}
+
+func wantsInsider(r *http.Request) bool { return r.URL.Query().Get("insider") == "true" }
+
+func exportDocument(action string, itinerary any, insider bool) schema {
+	instructions := exportInstructions
+	if insider {
+		instructions += "\n\n" + insiderInstructions
+	}
 	return schema{
 		"format":       exportFormat,
 		"version":      1,
 		"action":       action,
-		"instructions": exportInstructions,
+		"instructions": instructions,
 		"itinerary":    itinerary,
 		"schema":       itinerarySchema,
 	}
@@ -71,11 +124,15 @@ func (a *API) exportItinerary(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, ErrNotFound.Error())
 		return
 	}
-	writeDownload(w, it.ID+".itinerary.json", exportDocument("update", it))
+	writeDownload(w, it.ID+".itinerary.json", exportDocument("update", it, wantsInsider(r)))
 }
 
-func (a *API) exportTemplate(w http.ResponseWriter, _ *http.Request) {
-	writeDownload(w, "itinerary-template.json", exportDocument("create", templateItinerary))
+func (a *API) exportTemplate(w http.ResponseWriter, r *http.Request) {
+	if wantsInsider(r) {
+		writeDownload(w, "itinerary-template.json", exportDocument("create", insiderTemplate(), true))
+		return
+	}
+	writeDownload(w, "itinerary-template.json", exportDocument("create", templateItinerary, false))
 }
 
 // ImportResult describes what an import does (dry run) or did.
@@ -186,7 +243,7 @@ func (a *API) importItinerary(text string, dryRun bool) (*ImportResult, error) {
 	return res, nil
 }
 
-var itineraryFields = []string{"title", "subtitle", "duration", "targetAudience", "startLocation", "mapsUrl", "days", "checklist"}
+var itineraryFields = []string{"title", "subtitle", "duration", "targetAudience", "startLocation", "mapsUrl", "days", "checklist", "localGuide"}
 
 func changedFields(before, after *Itinerary) []string {
 	var b, c map[string]json.RawMessage
