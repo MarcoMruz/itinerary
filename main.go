@@ -162,6 +162,7 @@ type bootData struct {
 	List   []Summary  `json:"list"`
 	Active *Itinerary `json:"active"`
 	Shared bool       `json:"shared"` // read-only share link: one itinerary, no list or actions
+	SignIn bool       `json:"signIn"` // signed out with Google sign-in available
 	User   string     `json:"-"`      // signed-in Google account, shown in the footer
 }
 
@@ -211,7 +212,8 @@ func sharedHandler(store *Store, api *API, tmpl *template.Template) http.Handler
 		}
 		api.setShareCookie(w, r, id, key)
 		w.Header().Set("Referrer-Policy", "no-referrer") // the key is in the URL
-		renderPage(w, tmpl, bootData{List: []Summary{it.Summary()}, Active: it, Shared: true})
+		signIn := api.auth != nil && api.auth.sessionEmail(r) == ""
+		renderPage(w, tmpl, bootData{List: []Summary{it.Summary()}, Active: it, Shared: true, SignIn: signIn})
 	}
 }
 
