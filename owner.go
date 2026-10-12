@@ -100,7 +100,12 @@ func (a *API) ownerSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, schema{"canEdit": true})
 }
 
+// ownerSessionKey grants checklist edits to a signed-in account or a browser that opened the owner link.
 func (a *API) ownerSessionKey(r *http.Request) string {
+	if a.auth != nil && a.auth.sessionEmail(r) != "" {
+		key, _ := a.store.ownerKey(r.PathValue("id"), true)
+		return key
+	}
 	cookie, err := r.Cookie("itinerary_owner")
 	if err != nil {
 		return ""

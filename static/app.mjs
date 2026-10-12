@@ -13,6 +13,7 @@ export function itineraryApp(boot = {}) {
     error: '',
     notice: '',
     shared: !!boot.shared,
+    signIn: !!boot.signIn,
 
     init() {
       this.loadChecked();
@@ -69,6 +70,11 @@ export function itineraryApp(boot = {}) {
       this.dayIndex = 0;
       this.loadChecked();
       this.loadStart();
+    },
+    startSignIn() {
+      // The login page drops the URL, so hand the itinerary over to the signed-in page.
+      try { sessionStorage.setItem('itinerary_hash', '#' + encodeURIComponent(this.current.id)); } catch { /* storage unavailable */ }
+      location.assign('/auth/login');
     },
     async refreshList() {
       try {

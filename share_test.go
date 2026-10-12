@@ -80,3 +80,35 @@ func TestShareLinkMCPTool(t *testing.T) {
 		}
 	}
 }
+
+func TestSignedInUserEditsChecklistFromSharedPage(t *testing.T) {
+	srv, g := newAuthServer(t)
+	base := srv.URL + "/api/v1/itineraries/slovensky-raj-1yo"
+	_, b := do(t, "POST", base+"/share-link", "", "Authorization", "Bearer write")
+	var out struct{ URL string }
+	json.Unmarshal(b, &out)
+
+	if body := readBody(send(t, "GET", out.URL, "")); !strings.Contains(body, `"signIn":true`) {
+		t.Fatal("signed-out shared page must offer sign-in")
+	}
+	if _, b := do(t, "GET", base+"/checklist-access", ""); !strings.Contains(string(b), `"canEdit":false`) {
+		t.Fatalf("signed-out checklist access: %s", b)
+	}
+
+	session := cookieOf(signIn(t, srv, g, send(t, "GET", srv.URL+"/auth/login", "")), loginCookie).String()
+	if body := readBody(send(t, "GET", out.URL, "", "Cookie", session)); !strings.Contains(body, `"signIn":false`) {
+		t.Fatal("signed-in shared page must not offer sign-in")
+	}
+	if _, b := do(t, "GET", base+"/checklist-access", "", "Cookie", session); !strings.Contains(string(b), `"canEdit":true`) {
+		t.Fatalf("signed-in checklist access: %s", b)
+	}
+	if code, b := do(t, "GET", base+"/checklist-share", "", "Cookie", session); code != 200 || !strings.Contains(string(b), "/#slovensky-raj-1yo~") {
+		t.Fatalf("signed-in checklist share: %d %s", code, b)
+	}
+	if code, b := do(t, "PATCH", base+"/checklist", `{"checklist":["Voda"]}`, "Cookie", session, "Origin", srv.URL); code != 200 {
+		t.Fatalf("signed-in checklist edit: %d %s", code, b)
+	}
+	if code, _ := do(t, "PATCH", srv.URL+"/api/v1/itineraries/missing/checklist", `{"checklist":[]}`, "Cookie", session); code != 401 {
+		t.Fatalf("unknown itinerary edit: %d", code)
+	}
+}
