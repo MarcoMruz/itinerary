@@ -1,19 +1,69 @@
-const { test } = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const vm = require('node:vm');
+import { afterEach, test } from 'node:test';
+import assert from 'node:assert/strict';
+import { itineraryApp } from './static/app.mjs';
+import { checklistChanges, checklistProgress } from './static/domain/checklist.mjs';
+import { activityRoute, fmtLeg, totalLegs } from './static/domain/routes.mjs';
+
+const globalNames = ['localStorage', 'fetch', 'navigator', 'window', 'location', 'history'];
+const originalGlobals = Object.fromEntries(globalNames.map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
+afterEach(() => globalNames.forEach(name => {
+  if (originalGlobals[name]) Object.defineProperty(globalThis, name, originalGlobals[name]);
+  else delete globalThis[name];
+}));
 
 function setup(fetch, navigator = {}) {
   const current = { id: 'trip', days: [], checklist: ['Water', 'Hat'] };
-  const context = vm.createContext({
-    document: { getElementById: () => ({ textContent: JSON.stringify({ active: current }) }) },
+  const globals = {
     localStorage: { getItem: () => null, setItem() {} }, fetch, navigator, window: { confirm: () => true },
     location: { hash: '#trip' }, history: { replaceState() {} },
-  });
-  const html = fs.readFileSync('templates/index.html', 'utf8');
-  vm.runInContext(html.split('<script>')[1].split('</script>')[0], context);
-  return context.itineraryApp();
+  };
+  Object.entries(globals).forEach(([name, value]) => Object.defineProperty(globalThis, name, { value, writable: true, configurable: true }));
+  return itineraryApp({ active: current });
 }
+
+test('checklist rules trim edits, preserve renamed checks and reject blank items', () => {
+  const draft = Object.freeze([
+    Object.freeze({ original: 'Water', text: ' Fresh water ' }),
+    Object.freeze({ original: null, text: ' Hat ' }),
+  ]);
+  assert.deepEqual(checklistChanges(draft, ['Water', 'Hat']), {
+    checklist: ['Fresh water', 'Hat'], checked: ['Fresh water'], valid: true,
+  });
+  assert.equal(checklistChanges([{ original: null, text: ' ' }], []).valid, false);
+  assert.deepEqual(checklistChanges([], []), { checklist: [], checked: [], valid: true });
+  assert.deepEqual(checklistProgress([], ['Water']), { done: 0, total: 0, pct: 0 });
+  assert.deepEqual(checklistProgress(['Water', 'Hat'], ['Water', 'Removed']), { done: 1, total: 2, pct: 50 });
+});
+
+test('route rules preserve return visits, skip missing places and require complete totals', () => {
+  const activities = Object.freeze([
+    Object.freeze({ place: 'Lake' }), Object.freeze({}), Object.freeze({ place: 'Lake' }),
+    Object.freeze({ place: 'Town' }), Object.freeze({ place: 'Lake' }),
+  ]);
+  assert.deepEqual(activityRoute(activities), {
+    stops: ['Lake', 'Town', 'Lake'], nums: [1, 0, 1, 2, 3], first: [true, false, false, true, true],
+  });
+  assert.equal(totalLegs([]), null);
+  assert.equal(totalLegs([{ meters: 100, seconds: 10 }, null]), null);
+  assert.deepEqual(totalLegs([{ meters: 100, seconds: 10 }, { meters: 200, seconds: 20 }]), { meters: 300, seconds: 30 });
+  assert.equal(fmtLeg(null), '');
+  assert.equal(fmtLeg({ meters: 999, seconds: 0 }), '999 m · 1 min');
+  assert.equal(fmtLeg({ meters: 1500, seconds: 3660 }), '1,5 km · 1 h 01 min');
+});
+
+test('feature state is isolated and composed getters stay live', () => {
+  const first = setup(async () => ({}));
+  const second = itineraryApp();
+  first.io.text = 'draft';
+  first.checked = ['Water'];
+  assert.equal(second.io.text, '');
+  assert.deepEqual(second.checked, []);
+  assert.equal(first.progress.pct, 50);
+  first.current = { ...first.current, checklist: ['Water'] };
+  assert.equal(first.progress.pct, 100);
+  assert.equal(second.progress.pct, 0);
+  assert.equal(second.tripUrl, '');
+});
 
 test('add, rename and remove save while preserving checked state', async () => {
   let sent;

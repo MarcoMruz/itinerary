@@ -1,0 +1,44 @@
+{{define "navigation"}}
+<dialog x-ref="nav" @click="$event.target === $el && $el.close()" aria-labelledby="nav-title"
+        class="m-0 mt-auto w-full max-w-none rounded-t-3xl bg-white p-0 text-stone-800 shadow-2xl backdrop:bg-stone-900/50 sm:m-auto sm:max-w-md sm:rounded-3xl">
+  <div class="p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:p-6">
+    <div class="flex items-start justify-between gap-3">
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-wide text-emerald-700">Otvoriť v aplikácii</p>
+        <h2 id="nav-title" class="mt-0.5 text-lg font-bold text-stone-900" x-text="nav.title"></h2>
+      </div>
+      <button type="button" @click="$refs.nav.close()" aria-label="Zavrieť"
+              class="-mr-2 -mt-1 rounded-full p-2 text-stone-400 hover:bg-stone-100 hover:text-stone-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
+        {{template "close-icon"}}
+      </button>
+    </div>
+    <p class="mt-2 text-sm text-stone-500" x-text="[nav.origin || 'Aktuálna poloha'].concat(nav.stops).join(' → ')"></p>
+    <ul class="mt-4 space-y-2">
+      <template x-for="app in navApps" :key="app.id">
+        <li class="overflow-hidden rounded-2xl ring-1 transition"
+            :class="app.id === lastApp ? 'bg-emerald-50 ring-2 ring-emerald-500' : 'ring-stone-200 hover:bg-stone-50'">
+          <a :href="app.url" target="_blank" rel="noopener noreferrer" @click="pick(app.id)"
+             class="flex items-center gap-3 p-3 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-emerald-500">
+            <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-lg font-bold text-white" :class="app.color" x-text="app.letter" aria-hidden="true"></span>
+            <span class="min-w-0 flex-1">
+              <span class="flex items-center gap-2">
+                <span class="font-semibold text-stone-900" x-text="app.name"></span>
+                <span x-show="app.id === lastApp" class="rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">naposledy</span>
+              </span>
+              <span class="block text-xs text-stone-500" x-text="app.note"></span>
+            </span>
+            <span class="text-stone-400" aria-hidden="true">↗</span>
+          </a>
+          <div x-show="app.more.length" class="flex flex-wrap items-center gap-1.5 px-3 pb-3 pl-[68px] text-xs">
+            <span class="text-stone-400">ďalej:</span>
+            <template x-for="m in app.more" :key="m.url">
+              <a :href="m.url" target="_blank" rel="noopener noreferrer" @click="pick(app.id)" x-text="m.label"
+                 class="rounded-full bg-white px-2.5 py-1 font-semibold text-sky-700 ring-1 ring-sky-200 hover:bg-sky-50"></a>
+            </template>
+          </div>
+        </li>
+      </template>
+    </ul>
+  </div>
+</dialog>
+{{end}}

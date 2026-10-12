@@ -1,0 +1,9 @@
+{{define "footer"}}
+<footer class="border-t border-stone-200 py-4 text-center text-xs text-stone-400">
+  <p x-show="shared">Zdieľaný itinerár, len na čítanie. Odškrtnutie checklistu sa uloží iba vo vašom zariadení.</p>
+  <div x-show="!shared">Agent ready: <a class="text-emerald-700 hover:underline" href="/api/v1/openapi.json">OpenAPI</a> ·
+  <a class="text-emerald-700 hover:underline" href="/api/v1/itineraries">REST API</a> ·
+  MCP <code>POST /mcp</code></div>
+  {{if .User}}<form method="post" action="/auth/logout" class="mt-2">{{.User}} · <button class="text-emerald-700 hover:underline">Odhlásiť sa</button></form>{{end}}
+</footer>
+{{end}}

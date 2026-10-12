@@ -20,8 +20,10 @@ import (
 // Templates and seed data are compiled into the binary: the image needs no
 // extra files, and an empty mounted volume is initialised from the seed.
 var (
-	//go:embed templates/index.html templates/auth.html
+	//go:embed templates
 	templateFS embed.FS
+	//go:embed static
+	staticFS embed.FS
 	//go:embed data/itineraries.json
 	seedData []byte
 )
@@ -120,11 +122,12 @@ func run() error {
 
 // newHandler wires every route in one place.
 func newHandler(store *Store, api *API, sec SecurityConfig) (http.Handler, error) {
-	tmpl, err := template.ParseFS(templateFS, "templates/index.html")
+	tmpl, err := template.ParseFS(templateFS, "templates/index.html", "templates/components/*.html")
 	if err != nil {
 		return nil, err
 	}
 	mux := http.NewServeMux()
+	mux.Handle("GET /static/", http.FileServerFS(staticFS))
 	mux.HandleFunc("GET /{$}", indexHandler(store, api, tmpl))
 	mux.HandleFunc("GET /s/{id}/{key}", sharedHandler(store, api, tmpl))
 	mux.HandleFunc("POST /api/v1/itineraries/{id}/share-link", api.createShareLink)

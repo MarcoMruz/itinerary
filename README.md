@@ -8,9 +8,18 @@ Data lives in memory and is written atomically to `data/itineraries.json` on eve
 ```sh
 go run .                       # http://localhost:9876
 go test ./...
-node --test checklist_test.cjs
+node --test frontend_test.mjs
 docker build -t itinerary . && docker run -p 9876:9876 -v itinerary-data:/root/data itinerary
 ```
+
+## Frontend structure
+
+- `templates/index.html` composes the page from `templates/components/` (header, day route, timeline, checklist, dialogs, footer).
+- `static/app.mjs` owns itinerary selection and coordinates the feature modules in `static/features/`.
+- `static/domain/` holds pure route, checklist, and import/export rules, independent of Alpine and browser APIs.
+- `static/bootstrap.mjs` restores private links and starts Alpine after registering the app.
+
+Templates and modules are embedded in the Go binary. Native JavaScript modules need no bundler or npm dependencies. Run frontend tests with Node.js 18+.
 
 | Env                     | Default                 | Purpose                                                                 |
 |-------------------------|-------------------------|-------------------------------------------------------------------------|

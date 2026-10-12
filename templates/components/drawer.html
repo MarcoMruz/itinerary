@@ -1,0 +1,51 @@
+{{define "drawer"}}
+<dialog x-ref="drawer" @click="$event.target === $el && $el.close()" aria-labelledby="drawer-title"
+        class="fixed inset-y-0 left-0 m-0 h-full max-h-none w-[85vw] max-w-xs bg-white p-0 text-stone-800 shadow-2xl backdrop:bg-stone-900/50">
+  <div class="flex h-full flex-col">
+    <div class="flex items-center justify-between bg-gradient-to-br from-emerald-900 to-emerald-700 px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] text-white">
+      <p id="drawer-title" class="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-emerald-100">
+        <svg class="h-5 w-5 text-amber-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 20l6-16 4 10 3-5 5 11H3z"/></svg>
+        Rodinné itineráre
+      </p>
+      <button type="button" @click="$refs.drawer.close()" aria-label="Zavrieť menu" class="-mr-2 rounded-full p-2 text-emerald-100 hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300">
+        {{template "close-icon"}}
+      </button>
+    </div>
+    <nav class="flex-1 overflow-y-auto p-3" aria-label="Itineráre">
+      <p class="px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-stone-500" x-text="'Itineráre (' + list.length + ')'"></p>
+      <ul class="space-y-1">
+        <template x-for="i in list" :key="i.id">
+          <li>
+            <button type="button" @click="$refs.drawer.close(); select(i.id)" :aria-current="i.id === selectedId ? 'page' : null"
+                    class="flex w-full items-start gap-3 rounded-xl p-3 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                    :class="i.id === selectedId ? 'bg-emerald-50 ring-1 ring-emerald-200' : 'hover:bg-stone-50'">
+              <span class="mt-1 h-2.5 w-2.5 shrink-0 rounded-full" :class="i.id === selectedId ? 'bg-emerald-600' : 'bg-stone-200'" aria-hidden="true"></span>
+              <span class="min-w-0">
+                <span class="block font-semibold leading-snug" :class="i.id === selectedId ? 'text-emerald-900' : 'text-stone-900'" x-text="i.title"></span>
+                <span class="block truncate text-xs text-stone-500" x-text="[i.duration, i.targetAudience].filter(Boolean).join(' · ')"></span>
+              </span>
+            </button>
+          </li>
+        </template>
+      </ul>
+      <p x-show="!list.length" class="px-2 text-sm text-stone-500">Zatiaľ žiadne itineráre.</p>
+    </nav>
+    <div class="border-t border-stone-200 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+      <p class="px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-stone-500">Akcie</p>
+      <button type="button" x-show="current" @click="$refs.drawer.close(); openShare()"
+              class="flex w-full items-center gap-3 rounded-xl p-3 text-left hover:bg-stone-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
+        <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-400 text-emerald-950"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path stroke-linecap="round" d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg></span>
+        <span><span class="block font-semibold text-stone-900">Zdieľať na čítanie</span><span class="block text-xs text-stone-500">Odkaz bez prihlásenia, len tento itinerár</span></span>
+      </button>
+      <button type="button" @click="$refs.drawer.close(); openIO()"
+              class="flex w-full items-center gap-3 rounded-xl p-3 text-left hover:bg-stone-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
+        <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-700 text-white">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M7 10l5-5 5 5M12 5v11M5 19h14"/></svg>
+        </span>
+        <span><span class="block font-semibold text-stone-900">Import / Export</span><span class="block text-xs text-stone-500">Pre ChatGPT, Gemini a Claude</span></span>
+      </button>
+      {{if .User}}<form method="post" action="/auth/logout" class="mt-1 px-3 py-2 text-xs text-stone-500">{{.User}} · <button class="font-semibold text-emerald-700 hover:underline">Odhlásiť sa</button></form>{{end}}
+    </div>
+  </div>
+</dialog>
+{{end}}
