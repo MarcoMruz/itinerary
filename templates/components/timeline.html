@@ -31,6 +31,15 @@
             Navigovať ↗
           </a>
         </div>
+        <button type="button" x-show="a.insight" @click="openPlace(j)"
+                class="mt-3 flex w-full items-start gap-2 rounded-xl bg-amber-50 px-3 py-2 text-left text-sm ring-1 ring-amber-200 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+          <span class="mt-0.5 text-amber-600">{{template "insider-icon"}}</span>
+          <span class="min-w-0 flex-1">
+            <span class="block font-semibold text-amber-900">Tip od miestneho</span>
+            <span class="line-clamp-2 text-stone-700" x-show="a.insight && a.insight.summary" x-text="a.insight ? a.insight.summary : ''"></span>
+          </span>
+          <span class="shrink-0 self-center font-semibold text-emerald-700" aria-hidden="true">→</span>
+        </button>
       </article>
     </li>
   </template>

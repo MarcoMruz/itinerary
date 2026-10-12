@@ -46,5 +46,9 @@
   </ol>
   <p class="mt-2 text-sm text-stone-500" x-show="legTotal" x-text="'Spolu autom: ' + fmtLeg(legTotal)"></p>
   <p class="mt-3 text-sm text-stone-500" x-show="!dayRoute.stops.length">Tento deň nemá žiadne body na mape.</p>
+  <button type="button" x-show="hasGuide && current.localGuide.gettingAround" @click="openGuide()"
+          class="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
+    Ako sa tu pohybovať · rady od miestnych →
+  </button>
 </div>
 {{end}}

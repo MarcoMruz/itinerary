@@ -1,7 +1,9 @@
 import { checklist } from './features/checklist.mjs';
 import { importExport } from './features/import-export.mjs';
+import { insights } from './features/insights.mjs';
 import { routes } from './features/routes.mjs';
 import { sharing } from './features/sharing.mjs';
+import { parseHash, viewHash } from './domain/insights.mjs';
 
 export function itineraryApp(boot = {}) {
   const app = {
@@ -32,15 +34,15 @@ export function itineraryApp(boot = {}) {
     },
     get day() { return this.current ? this.current.days[this.dayIndex] : null; },
     openFromHash() {
-      const parts = location.hash.slice(1).split('~');
-      const id = decodeURIComponent(parts[0]);
-      if (parts[1]) {
-        history.replaceState(null, '', '#' + encodeURIComponent(id));
-        this.activateOwner(id, parts[1]);
+      const { id, key, view } = parseHash(location.hash);
+      if (key) {
+        history.replaceState(null, '', view ? viewHash(view) : '#' + encodeURIComponent(id));
+        this.activateOwner(id, key);
       }
-      if (id && id !== this.selectedId) this.select(id);
+      if (id && id !== this.selectedId) this.select(id, view);
+      else this.showView(view);
     },
-    async select(id) {
+    async select(id, view = null) {
       if (!id) return;
       if (this.savingChecklist || (this.editingChecklist && !window.confirm('Zahodiť neuložené zmeny?'))) {
         this.selectedId = this.current.id;
@@ -51,7 +53,8 @@ export function itineraryApp(boot = {}) {
       this.notice = '';
       this.selectedId = id;
       this.error = '';
-      if (decodeURIComponent(location.hash.slice(1)) !== id) history.replaceState(null, '', '#' + encodeURIComponent(id));
+      this.showView(null);
+      if (!view && decodeURIComponent(location.hash.slice(1)) !== id) history.replaceState(null, '', '#' + encodeURIComponent(id));
       this.loading = true;
       let itinerary;
       try {
@@ -68,6 +71,7 @@ export function itineraryApp(boot = {}) {
       this.current = itinerary;
       this.checkChecklistAccess();
       this.dayIndex = 0;
+      this.showView(view);
       this.loadChecked();
       this.loadStart();
     },
@@ -84,5 +88,5 @@ export function itineraryApp(boot = {}) {
     },
   };
   // Preserve reactive getters; object spread would evaluate them before Alpine binds the app.
-  return Object.defineProperties(app, Object.assign({}, ...[checklist(), routes(), sharing(), importExport()].map(Object.getOwnPropertyDescriptors)));
+  return Object.defineProperties(app, Object.assign({}, ...[checklist(), routes(), sharing(), importExport(), insights()].map(Object.getOwnPropertyDescriptors)));
 }

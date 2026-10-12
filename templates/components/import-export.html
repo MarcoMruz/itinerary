@@ -22,7 +22,14 @@
       <textarea x-model="io.request" rows="2" maxlength="2000" placeholder="napr. Pridaj na sobotu obed v Hrabušiciach a do checklistu opaľovací krém."
                 class="mt-1 w-full rounded-xl border border-stone-200 bg-stone-50 p-3 text-sm focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200"></textarea>
     </label>
-    <div class="mt-2 grid gap-3 sm:grid-cols-2">
+    <label class="mt-3 flex cursor-pointer items-start gap-3 rounded-2xl bg-amber-50/70 p-3 ring-1 ring-amber-200">
+      <input type="checkbox" x-model="io.insider" class="mt-0.5 h-5 w-5 shrink-0 accent-emerald-700">
+      <span>
+        <span class="block text-sm font-semibold text-stone-900">Pridať rady od miestneho</span>
+        <span class="block text-xs text-stone-600">Asistent urobí hĺbkový prieskum a ku každému miestu dopíše, čo vedia len miestni: kedy prísť, čomu sa vyhnúť, ako sa tam pohybovať. Rady uvidíte na samostatnej stránke.</span>
+      </span>
+    </label>
+    <div class="mt-3 grid gap-3 sm:grid-cols-2">
       <div class="rounded-2xl p-4 ring-1 ring-stone-200" x-show="current">
         <p class="font-semibold text-stone-900">Upraviť tento itinerár</p>
         <p class="mt-0.5 truncate text-xs text-stone-500" x-text="current ? current.title : ''"></p>
@@ -35,8 +42,8 @@
         <p class="font-semibold text-stone-900">Nový itinerár zo šablóny</p>
         <p class="mt-0.5 text-xs text-stone-500">Prázdna kostra s príkladom a pravidlami</p>
         <div class="mt-3 flex gap-2">
-          <a href="/api/v1/import/template" download class="flex-1 rounded-lg bg-amber-400 px-3 py-2 text-center text-sm font-semibold text-emerald-950 hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-emerald-500">Stiahnuť šablónu</a>
-          <button type="button" @click="copyForChat('/api/v1/import/template', 'create')" title="Kopírovať šablónu pre chat" aria-label="Kopírovať šablónu pre chat" class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500"><svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path stroke-linecap="round" stroke-linejoin="round" d="M5 15V6a2 2 0 012-2h9"/></svg></button>
+          <a :href="templateUrl" download class="flex-1 rounded-lg bg-amber-400 px-3 py-2 text-center text-sm font-semibold text-emerald-950 hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-emerald-500">Stiahnuť šablónu</a>
+          <button type="button" @click="copyForChat(templateUrl, 'create')" title="Kopírovať šablónu pre chat" aria-label="Kopírovať šablónu pre chat" class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500"><svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path stroke-linecap="round" stroke-linejoin="round" d="M5 15V6a2 2 0 012-2h9"/></svg></button>
         </div>
       </div>
     </div>

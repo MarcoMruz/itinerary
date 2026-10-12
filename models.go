@@ -13,12 +13,31 @@ import (
 
 // Activity is one timeline entry within a day.
 type Activity struct {
-	Time     string `json:"time"`
-	Title    string `json:"title"`
-	Location string `json:"location,omitempty"`
-	Place    string `json:"place,omitempty"` // geocodable stop; activities with a place form the day route
-	MapsURL  string `json:"mapsUrl,omitempty"`
-	Badge    string `json:"badge,omitempty"`
+	Time     string   `json:"time"`
+	Title    string   `json:"title"`
+	Location string   `json:"location,omitempty"`
+	Place    string   `json:"place,omitempty"` // geocodable stop; activities with a place form the day route
+	MapsURL  string   `json:"mapsUrl,omitempty"`
+	Badge    string   `json:"badge,omitempty"`
+	Insight  *Insight `json:"insight,omitempty"`
+}
+
+// Insight is what a local would tell a friend about one place.
+type Insight struct {
+	Summary  string   `json:"summary,omitempty"` // one-line teaser shown on the timeline
+	BestTime string   `json:"bestTime,omitempty"`
+	Tips     []string `json:"tips,omitempty"`
+	Avoid    []string `json:"avoid,omitempty"`
+	Sources  []string `json:"sources,omitempty"`
+}
+
+// LocalGuide is trip-wide local know-how, shown on its own page.
+type LocalGuide struct {
+	Summary       string   `json:"summary,omitempty"`
+	GettingAround []string `json:"gettingAround,omitempty"`
+	Tips          []string `json:"tips,omitempty"`
+	Avoid         []string `json:"avoid,omitempty"`
+	Sources       []string `json:"sources,omitempty"`
 }
 
 // Day groups activities under a label such as "Piatok" or "Deň 1".
@@ -41,15 +60,16 @@ func (d Day) RouteStops() []string {
 
 // Stored itineraries are immutable; the store returns independent copies.
 type Itinerary struct {
-	ID             string   `json:"id"`
-	Title          string   `json:"title"`
-	Subtitle       string   `json:"subtitle,omitempty"`
-	Duration       string   `json:"duration,omitempty"`
-	TargetAudience string   `json:"targetAudience,omitempty"`
-	StartLocation  string   `json:"startLocation,omitempty"` // default origin of every day route, e.g. the hotel
-	MapsURL        string   `json:"mapsUrl,omitempty"`
-	Days           []Day    `json:"days"`
-	Checklist      []string `json:"checklist"`
+	ID             string      `json:"id"`
+	Title          string      `json:"title"`
+	Subtitle       string      `json:"subtitle,omitempty"`
+	Duration       string      `json:"duration,omitempty"`
+	TargetAudience string      `json:"targetAudience,omitempty"`
+	StartLocation  string      `json:"startLocation,omitempty"` // default origin of every day route, e.g. the hotel
+	MapsURL        string      `json:"mapsUrl,omitempty"`
+	Days           []Day       `json:"days"`
+	Checklist      []string    `json:"checklist"`
+	LocalGuide     *LocalGuide `json:"localGuide,omitempty"`
 }
 
 // Summary is the list projection of an itinerary.
@@ -72,6 +92,8 @@ const (
 	maxActivities   = 50
 	maxChecklist    = 200
 	maxTextRunes    = 500
+	maxInsightItems = 15
+	maxSources      = 10
 	maxSlugBaseLen  = 48
 	defaultSlugBase = "itinerar"
 )
@@ -131,6 +153,14 @@ func (it *Itinerary) Normalize() error {
 		}
 	}
 	it.Checklist = items
+	if it.LocalGuide != nil {
+		if err := it.LocalGuide.normalize(); err != nil {
+			return err
+		}
+		if it.LocalGuide.empty() {
+			it.LocalGuide = nil
+		}
+	}
 	if it.Duration == "" {
 		it.Duration = dayCount(len(it.Days))
 	}
@@ -170,8 +200,92 @@ func (d *Day) normalize(i int) error {
 		if a.MapsURL == "" && a.Place != "" {
 			a.MapsURL = mapsSearchURL(a.Place)
 		}
+		if a.Insight != nil {
+			if err := a.Insight.normalize(af + ".insight"); err != nil {
+				return err
+			}
+			if a.Insight.empty() {
+				a.Insight = nil
+			}
+		}
 	}
 	return nil
+}
+
+func (in *Insight) normalize(field string) error {
+	for _, f := range []struct {
+		name string
+		v    *string
+	}{{"summary", &in.Summary}, {"bestTime", &in.BestTime}} {
+		if err := cleanText(field+"."+f.name, f.v); err != nil {
+			return err
+		}
+	}
+	var err error
+	if in.Tips, err = cleanList(field+".tips", in.Tips, maxInsightItems); err != nil {
+		return err
+	}
+	if in.Avoid, err = cleanList(field+".avoid", in.Avoid, maxInsightItems); err != nil {
+		return err
+	}
+	in.Sources, err = cleanSources(field+".sources", in.Sources)
+	return err
+}
+
+func (in *Insight) empty() bool {
+	return in.Summary == "" && in.BestTime == "" && len(in.Tips) == 0 && len(in.Avoid) == 0
+}
+
+func (g *LocalGuide) normalize() error {
+	if err := cleanText("localGuide.summary", &g.Summary); err != nil {
+		return err
+	}
+	var err error
+	if g.GettingAround, err = cleanList("localGuide.gettingAround", g.GettingAround, maxInsightItems); err != nil {
+		return err
+	}
+	if g.Tips, err = cleanList("localGuide.tips", g.Tips, maxInsightItems); err != nil {
+		return err
+	}
+	if g.Avoid, err = cleanList("localGuide.avoid", g.Avoid, maxInsightItems); err != nil {
+		return err
+	}
+	g.Sources, err = cleanSources("localGuide.sources", g.Sources)
+	return err
+}
+
+func (g *LocalGuide) empty() bool {
+	return g.Summary == "" && len(g.GettingAround) == 0 && len(g.Tips) == 0 && len(g.Avoid) == 0
+}
+
+// cleanList trims items and drops blank ones; nil when nothing remains.
+func cleanList(field string, list []string, max int) ([]string, error) {
+	if len(list) > max {
+		return nil, invalid("%s may contain at most %d items", field, max)
+	}
+	var out []string
+	for i, item := range list {
+		if err := cleanText(fmt.Sprintf("%s[%d]", field, i), &item); err != nil {
+			return nil, err
+		}
+		if item != "" {
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
+
+func cleanSources(field string, list []string) ([]string, error) {
+	out, err := cleanList(field, list, maxSources)
+	if err != nil {
+		return nil, err
+	}
+	for i, u := range out {
+		if err := checkURL(fmt.Sprintf("%s[%d]", field, i), u); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 func mapsSearchURL(place string) string {
@@ -245,6 +359,36 @@ type schema = map[string]any
 
 func strProp(desc string) schema { return schema{"type": "string", "description": desc} }
 
+func listProp(desc string, max int) schema {
+	return schema{"type": "array", "maxItems": max, "items": schema{"type": "string"}, "description": desc}
+}
+
+var sourcesProp = schema{"type": "array", "maxItems": maxSources, "items": schema{"type": "string", "format": "uri"}, "description": "Absolute http(s) links the advice is based on"}
+
+var insightSchema = schema{
+	"type":        "object",
+	"description": "Optional local know-how for this place, as a resident would tell a friend. Shown on a separate page; the summary appears on the timeline",
+	"properties": schema{
+		"summary":  strProp("One line: the single most useful thing to know about this place"),
+		"bestTime": strProp("When to arrive and why, e.g. 'Before 9:00, tour buses arrive at 10:00'"),
+		"tips":     listProp("Concrete local tips: entrance, parking, what to order, hidden spots nearby, how to skip queues", maxInsightItems),
+		"avoid":    listProp("Tourist traps, scams, overpriced spots, closures, crowd peaks", maxInsightItems),
+		"sources":  sourcesProp,
+	},
+}
+
+var localGuideSchema = schema{
+	"type":        "object",
+	"description": "Optional trip-wide local know-how shown on its own page. Send {} to clear it",
+	"properties": schema{
+		"summary":       strProp("One or two sentences a local would open with"),
+		"gettingAround": listProp("Moving around: transport, tickets and apps, parking rules, tolls and vignettes, taxis, walking distances, strollers", maxInsightItems),
+		"tips":          listProp("Customs, tipping, opening hours, payment, local food, events during the trip", maxInsightItems),
+		"avoid":         listProp("Traps and mistakes visitors make", maxInsightItems),
+		"sources":       sourcesProp,
+	},
+}
+
 var activitySchema = schema{
 	"type":     "object",
 	"required": []string{"time", "title"},
@@ -255,6 +399,7 @@ var activitySchema = schema{
 		"place":    strProp("Place the stop is at, findable on both Google Maps and OpenStreetMap: the official name as shown on the map (add the town only if the name alone is ambiguous, e.g. 'Stratenský kaňon, Stratená') or a street address. No descriptive extras like 'parking' or 'by the lake'; unknown names get no driving distance. Activities with a place become numbered stops of the day route; mapsUrl is derived from it when omitted"),
 		"mapsUrl":  strProp("Absolute http(s) Google Maps URL"),
 		"badge":    strProp("Short tag shown as a badge, e.g. 'Relax'"),
+		"insight":  insightSchema,
 	},
 }
 
@@ -282,7 +427,8 @@ var itinerarySchema = schema{
 				},
 			},
 		},
-		"checklist": schema{"type": "array", "maxItems": maxChecklist, "items": schema{"type": "string"}, "description": "Packing / preparation items"},
+		"checklist":  schema{"type": "array", "maxItems": maxChecklist, "items": schema{"type": "string"}, "description": "Packing / preparation items"},
+		"localGuide": localGuideSchema,
 	},
 }
 

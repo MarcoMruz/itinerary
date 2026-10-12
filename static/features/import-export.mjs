@@ -1,11 +1,12 @@
-import { chatMessage, fieldLabels, previewStats } from '../domain/import-export.mjs';
+import { chatMessage, exportUrl, fieldLabels, previewStats } from '../domain/import-export.mjs';
 
 export function importExport() {
   return {
-    io: { request: '', text: '', token: '', needToken: false, busy: false, error: '', preview: null, copyMessage: '' },
+    io: { request: '', insider: false, text: '', token: '', needToken: false, busy: false, error: '', preview: null, copyMessage: '' },
     fieldLabels,
 
-    get exportUrl() { return this.current ? '/api/v1/itineraries/' + encodeURIComponent(this.current.id) + '/export' : ''; },
+    get exportUrl() { return this.current ? exportUrl('/api/v1/itineraries/' + encodeURIComponent(this.current.id) + '/export', this.io.insider) : ''; },
+    get templateUrl() { return exportUrl('/api/v1/import/template', this.io.insider); },
     get previewStats() { return previewStats(this.io.preview && this.io.preview.itinerary); },
     openIO() {
       this.io.error = '';
@@ -17,7 +18,7 @@ export function importExport() {
       try {
         const response = await fetch(url, { headers: { Accept: 'application/json' } });
         if (!response.ok) throw new Error();
-        await navigator.clipboard.writeText(chatMessage(this.io.request, action, await response.text()));
+        await navigator.clipboard.writeText(chatMessage(this.io.request, action, await response.text(), this.io.insider));
         this.io.copyMessage = 'Skopírované. Vložte to do chatu s asistentom ako jednu správu.';
       } catch {
         this.io.copyMessage = 'Kopírovanie zlyhalo, použite stiahnutie.';

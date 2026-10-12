@@ -37,7 +37,7 @@ func TestPageIncludesComponentsAndModuleEntry(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("page: %d %s", status, body)
 	}
-	for _, marker := range []string{`type="module" src="/static/bootstrap.mjs"`, `aria-label="Program"`, `aria-label="Checklist"`, `x-ref="nav"`, `x-ref="drawer"`, `x-ref="share"`, `x-ref="io"`} {
+	for _, marker := range []string{`type="module" src="/static/bootstrap.mjs"`, `aria-label="Program"`, `aria-label="Checklist"`, `x-ref="nav"`, `x-ref="drawer"`, `x-ref="share"`, `x-ref="io"`, `aria-label="Rady od miestnych"`, `x-model="io.insider"`} {
 		if !strings.Contains(string(body), marker) {
 			t.Errorf("page missing %s", marker)
 		}

@@ -20,7 +20,8 @@
       Zatiaľ žiadne itineráre. Pridajte ich cez <code class="text-emerald-700">POST /api/v1/itineraries</code> alebo MCP nástroj <code class="text-emerald-700">add_itinerary</code>,
       alebo cez <button type="button" @click="openIO()" class="font-semibold text-emerald-700 hover:underline">Import / Export</button> so šablónou pre AI asistenta.
     </div>
-    <template x-if="current">
+    <template x-if="page">{{template "insight-page" .}}</template>
+    <template x-if="current && !page">
       <div class="grid gap-6 transition-opacity duration-200 lg:grid-cols-3" :class="loading && 'opacity-50'">
         <section class="lg:col-span-2" aria-label="Program">
           {{template "day-route" .}}
