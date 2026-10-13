@@ -32,11 +32,12 @@ var mcpVersions = []string{"2024-11-05", "2025-03-26", "2025-06-18"}
 // API serves the REST and MCP endpoints on top of a Store.
 type API struct {
 	store     *Store
-	token     string // optional bearer token guarding writes
-	readToken string // optional bearer token guarding reads and MCP
-	publicURL string // optional absolute base URL for the OpenAPI document
-	auth      *Auth  // Google sign-in and OAuth for MCP clients; nil = tokens only
-	geo       *Geo   // nil disables distances
+	token     string   // optional bearer token guarding writes
+	readToken string   // optional bearer token guarding reads and MCP
+	publicURL string   // optional absolute base URL for the OpenAPI document
+	auth      *Auth    // Google sign-in and OAuth for MCP clients; nil = tokens only
+	geo       *Geo     // nil disables distances
+	weather   *Weather // nil disables the daily weather
 	// startLimiter caps uncached start lookups per client, so one visitor
 	// cannot occupy the shared, rate-limited geocoder.
 	startLimiter *rateLimiter
@@ -278,6 +279,43 @@ func (a *API) getDayLegs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, a.geo.Route(ctx, start, stops))
 }
 
+// getDayWeather returns the forecast for one itinerary day at its first stop
+// (else the startLocation). ?date= overrides the stored date, so visitors can
+// see the weather for trips that have no dates yet.
+func (a *API) getDayWeather(w http.ResponseWriter, r *http.Request) {
+	if a.weather == nil {
+		writeError(w, http.StatusNotFound, "weather is disabled")
+		return
+	}
+	it, ok := a.store.Get(r.PathValue("id"))
+	day, err := strconv.Atoi(r.PathValue("day"))
+	if !ok || err != nil || day < 0 || day >= len(it.Days) {
+		writeError(w, http.StatusNotFound, "itinerary day not found")
+		return
+	}
+	date := r.URL.Query().Get("date")
+	if date == "" {
+		date = it.DayDate(day)
+	}
+	if date == "" {
+		writeError(w, http.StatusBadRequest, "the day has no date: set startDate or pass ?date=YYYY-MM-DD")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), legsTimeout)
+	defer cancel()
+	res, err := a.weather.Day(ctx, it.WeatherPlace(day), date)
+	if errors.Is(err, ErrWeatherUnavailable) {
+		w.Header().Set("Retry-After", "10")
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
@@ -374,6 +412,20 @@ func (a *API) openAPI(w http.ResponseWriter, r *http.Request) {
 					},
 				}),
 			},
+			"/api/v1/itineraries/{id}/days/{day}/weather": schema{
+				"get": secured(schema{
+					"operationId": "getDayWeather", "summary": "Daily weather forecast (Open-Meteo) at the day's first stop, else the startLocation",
+					"parameters": []schema{
+						idParam[0],
+						{"name": "day", "in": "path", "required": true, "schema": schema{"type": "integer", "minimum": 0}, "description": "Zero-based day index"},
+						{"name": "date", "in": "query", "schema": schema{"type": "string", "format": "date"}, "description": "Date to forecast; defaults to the day's date or startDate + day"},
+					},
+					"responses": schema{
+						"200": resp("Weather; status ok carries values, otherwise no_place, not_found, too_far (see availableFrom) or too_old", schema{"type": "object"}),
+						"400": errResp("Missing or invalid date"), "404": errResp("Not found or weather disabled"), "503": errResp("Weather service unavailable, retry later"),
+					},
+				}),
+			},
 			"/api/v1/itineraries/{id}": schema{
 				"patch": secured(schema{
 					"operationId": "updateItinerary", "summary": "Edit supplied fields of an existing itinerary; arrays replace in full", "parameters": idParam,
@@ -456,7 +508,7 @@ func (a *API) dispatch(r *http.Request, req rpcRequest) (any, *rpcError) {
 			"protocolVersion": version,
 			"capabilities":    schema{"tools": schema{"listChanged": false}},
 			"serverInfo":      schema{"name": appName, "version": appVersion},
-			"instructions":    "Family travel itineraries. Use list_itineraries to discover ids, get_itinerary_detail for days/activities/checklist, add_itinerary to create one, and update_itinerary to edit supplied fields of an existing itinerary. Updates preserve omitted fields and replace supplied arrays in full. Give each activity place and the startLocation as an official map name or street address, so driving distances can be computed. Optional activity insight and itinerary localGuide hold researched local know-how (tips, what to avoid, getting around) shown on separate pages.",
+			"instructions":    "Family travel itineraries. Use list_itineraries to discover ids, get_itinerary_detail for days/activities/checklist, add_itinerary to create one, and update_itinerary to edit supplied fields of an existing itinerary. Updates preserve omitted fields and replace supplied arrays in full. Give each activity place and the startLocation as an official map name or street address, so driving distances can be computed. Set startDate (YYYY-MM-DD of the first day) when the dates are known, so each day shows its weather forecast. Optional activity insight and itinerary localGuide hold researched local know-how (tips, what to avoid, getting around) shown on separate pages.",
 		}, nil
 	case "ping":
 		return schema{}, nil

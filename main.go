@@ -71,6 +71,9 @@ func run() error {
 			api.startGlobal = newRateLimiter(startLookupsGlobalPerMinute, startLookupsGlobalPerMinute/2)
 		}
 		api.ipHeader = os.Getenv("CLIENT_IP_HEADER")
+		if env("WEATHER", "true") != "false" {
+			api.weather = NewWeather(api.geo, strings.TrimSpace(appName+"/"+appVersion+" "+api.publicURL))
+		}
 		if api.startLimiter != nil && api.ipHeader == "" {
 			log.Print("START_LOOKUPS_PER_MINUTE is keyed by peer IP; behind a proxy set CLIENT_IP_HEADER or all visitors share one budget")
 		}
@@ -139,6 +142,7 @@ func newHandler(store *Store, api *API, sec SecurityConfig) (http.Handler, error
 	mux.HandleFunc("GET /api/v1/itineraries", api.requireUIRead(api.listItineraries))
 	mux.HandleFunc("GET /api/v1/itineraries/{id}", api.requireUIRead(api.getItinerary))
 	mux.HandleFunc("GET /api/v1/itineraries/{id}/days/{day}/legs", api.requireUIRead(api.getDayLegs))
+	mux.HandleFunc("GET /api/v1/itineraries/{id}/days/{day}/weather", api.requireUIRead(api.getDayWeather))
 	mux.HandleFunc("GET /api/v1/itineraries/{id}/export", api.requireUIRead(api.exportItinerary))
 	mux.HandleFunc("GET /api/v1/import/template", api.requireUIRead(api.exportTemplate))
 	mux.HandleFunc("POST /api/v1/import", api.importHandler)

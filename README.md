@@ -39,6 +39,7 @@ Templates and modules are embedded in the Go binary. Native JavaScript modules n
 | `OAUTH_REDIRECT_HOSTS`  | `claude.ai,claude.com,localhost,127.0.0.1` | Hosts MCP clients may register OAuth redirect URIs on (https; http only on loopback) |
 | `AUTH_SECRET`           | *(generated)*           | Key signing sessions and tokens (32+ chars); by default a random key is saved in `auth-secret.key` beside `DATA_FILE` |
 | `DISTANCES`             | `true`                  | Driving distance between route stops (`false` to disable; place names are then never sent to OpenStreetMap) |
+| `WEATHER`               | `true`                  | Daily weather forecast from Open-Meteo for the selected day (`false` to disable; also off when `DISTANCES=false`, since places are geocoded with OpenStreetMap) |
 | `START_LOOKUPS_PER_MINUTE` | `20`                 | Uncached lookups (geocode, start→first stop) one client's start may cause per minute, burst half of it; all clients together are capped at 30/min so stops always get through (`0` disables both). Keyed by client IP, so set `CLIENT_IP_HEADER` behind a proxy |
 
 **Coolify:** use the Dockerfile build pack, port `9876`, add a persistent storage volume mounted at `/root/data`,
@@ -161,6 +162,11 @@ Distances: `GET /api/v1/itineraries/{id}/days/{day}/legs?start=…` geocodes the
 Stop answers, including "not found", are cached in `geo-cache.json` next to `DATA_FILE`; starts are cached in memory only.
 New itineraries are looked up in the background when added, so the first visitor rarely waits. The UI shows the leg above each numbered stop, a day total, and what the start matched on the map.
 Stops need names OpenStreetMap knows: the API schema and MCP instructions ask agents for official map names or street addresses; a stop it cannot find simply shows no distance.
+
+Weather: `GET /api/v1/itineraries/{id}/days/{day}/weather?date=YYYY-MM-DD` returns the daily forecast from [Open-Meteo](https://open-meteo.com/) (open source, no API key, CC BY 4.0)
+at the day's first stop, else the itinerary `startLocation`. The date comes from `?date=`, else the day's own `date`, else the itinerary `startDate` plus the day index.
+The UI shows a weather card for the selected day; visitors can pick the trip start date there (saved per itinerary in the browser) when the itinerary has none.
+Forecasts exist from about 3 months back to 16 days ahead; a later date answers `status: "too_far"` with `availableFrom`. Answers are cached in memory for an hour.
 
 ```sh
 claude mcp add --transport http itinerary https://your-host/mcp --header "Authorization: Bearer $API_TOKEN"

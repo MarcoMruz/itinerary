@@ -25,6 +25,7 @@
       <div class="grid gap-6 transition-opacity duration-200 lg:grid-cols-3" :class="loading && 'opacity-50'">
         <section class="lg:col-span-2" aria-label="Program">
           {{template "day-route" .}}
+          {{template "day-weather" .}}
           {{template "timeline" .}}
         </section>
         {{template "checklist" .}}

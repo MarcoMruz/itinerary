@@ -24,7 +24,7 @@ You are helping the user create or edit it. Follow these rules exactly:
 3. "itinerary" must follow "schema" (JSON Schema). Use only the fields it defines; required: "title" and "days", every activity needs "time" and "title".
 4. The import replaces the whole itinerary: include every day, activity and checklist item that should remain, not just the changes.
 5. Give every activity "place" and the "startLocation" as an official map name (as on Google Maps / OpenStreetMap) or a street address, so the app can compute driving distances. No descriptive extras like "parking" or "by the lake".
-6. Write the content in the language of the existing itinerary (Slovak unless the user asks otherwise). Times like "09:00 - 11:30" or "15:00+". Day labels like "Piatok" or "Deň 1".
+6. Write the content in the language of the existing itinerary (Slovak unless the user asks otherwise). Times like "09:00 - 11:30" or "15:00+". Day labels like "Piatok" or "Deň 1". Set "startDate" (YYYY-MM-DD of the first day) when the trip dates are known, so the app can show the weather forecast for each day.
 7. For a template, replace every example value with real content for the user's trip.
 After the user uploads your file in the app (Import), the app shows a preview and saves it.`
 
@@ -60,6 +60,7 @@ var templateItinerary = schema{
 	"subtitle":       "Krátky popis, napr. Predĺžený víkend s deťmi",
 	"targetAudience": "Kto cestuje, napr. 2 dospelí + 2 deti (3 a 6 rokov)",
 	"startLocation":  "Ubytovanie: oficiálny názov alebo adresa",
+	"startDate":      "2026-07-10",
 	"days": []schema{{
 		"label": "Piatok",
 		"activities": []schema{
@@ -243,7 +244,7 @@ func (a *API) importItinerary(text string, dryRun bool) (*ImportResult, error) {
 	return res, nil
 }
 
-var itineraryFields = []string{"title", "subtitle", "duration", "targetAudience", "startLocation", "mapsUrl", "days", "checklist", "localGuide"}
+var itineraryFields = []string{"title", "subtitle", "duration", "targetAudience", "startLocation", "startDate", "mapsUrl", "days", "checklist", "localGuide"}
 
 func changedFields(before, after *Itinerary) []string {
 	var b, c map[string]json.RawMessage

@@ -5,6 +5,7 @@ import { checklistChanges, checklistProgress } from './static/domain/checklist.m
 import { activityRoute, fmtLeg, totalLegs } from './static/domain/routes.mjs';
 import { chatMessage, exportUrl, previewStats } from './static/domain/import-export.mjs';
 import { hostname, insightPage, parseHash, viewHash } from './static/domain/insights.mjs';
+import { dayDate, describeWeather, fmtDate, fmtTemp } from './static/domain/weather.mjs';
 
 const globalNames = ['localStorage', 'fetch', 'navigator', 'window', 'location', 'history'];
 const originalGlobals = Object.fromEntries(globalNames.map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
@@ -326,4 +327,49 @@ test('a stale tip link falls back to the program without changing the day', () =
   location.hash = '#trip/guide';
   app.openGuide();
   assert.equal(app.pagesOpened, 0);
+});
+
+test('weather rules derive day dates and describe WMO codes', () => {
+  const days = Object.freeze([{}, { date: '2026-08-01' }, {}]);
+  assert.equal(dayDate(days, 0, '2026-07-30'), '2026-07-30');
+  assert.equal(dayDate(days, 1, '2026-07-30'), '2026-08-01');
+  assert.equal(dayDate(days, 2, '2026-12-30'), '2027-01-01');
+  assert.equal(dayDate(days, 0, ''), '');
+  assert.equal(dayDate(days, 0, 'tomorrow'), '');
+  assert.equal(dayDate(days, 5, '2026-07-30'), '');
+  assert.equal(fmtDate('2026-10-16'), 'pi 16. 10.');
+  assert.equal(fmtTemp(12.6), '13 °C');
+  assert.equal(fmtTemp(null), '–');
+  assert.equal(describeWeather(63).label, 'Dážď');
+  assert.equal(describeWeather(1234).label, 'Počasie');
+});
+
+test('weather loads once per day and date, and the browser start date overrides the itinerary', async () => {
+  const urls = [];
+  const app = setup(async url => {
+    urls.push(url);
+    return { ok: true, json: async () => ({ status: 'ok', weatherCode: 0, tempMax: 20, tempMin: 10 }) };
+  });
+  app.current = { ...app.current, startDate: '2026-07-01', days: [{ activities: [] }, { activities: [] }] };
+  app.loadTripStart();
+  app.dayIndex = 1;
+  assert.equal(app.dayDate, '2026-07-02');
+  assert.equal(app.dayWeather, undefined);
+  await app.loadWeather(0);
+  await app.loadWeather(0);
+  assert.deepEqual(urls, ['/api/v1/itineraries/trip/days/1/weather?date=2026-07-02']);
+  assert.equal(app.dayWeather.status, 'ok');
+  app.saveTripStart('2026-08-10');
+  assert.equal(app.dayDate, '2026-08-11');
+  assert.equal(app.dayWeather, undefined);
+  app.saveTripStart('');
+  assert.equal(app.dayDate, '2026-07-02');
+  assert.equal(app.dayWeather.status, 'ok');
+});
+
+test('disabled weather hides instead of failing', async () => {
+  const app = setup(async () => ({ ok: false, status: 404 }));
+  app.current = { ...app.current, days: [{ date: '2026-07-01', activities: [] }] };
+  await app.loadWeather(0);
+  assert.equal(app.dayWeather.status, 'disabled');
 });
