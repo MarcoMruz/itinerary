@@ -5,7 +5,7 @@ import { checklistChanges, checklistProgress } from './static/domain/checklist.m
 import { activityRoute, fmtLeg, totalLegs } from './static/domain/routes.mjs';
 import { chatMessage, exportUrl, previewStats } from './static/domain/import-export.mjs';
 import { hostname, insightPage, parseHash, viewHash } from './static/domain/insights.mjs';
-import { dayDate, describeWeather, fmtDate, fmtTemp } from './static/domain/weather.mjs';
+import { dayDate, describeWeather, fmtDate, fmtTemp, isPastDate, localDate } from './static/domain/weather.mjs';
 
 const globalNames = ['localStorage', 'fetch', 'navigator', 'window', 'location', 'history'];
 const originalGlobals = Object.fromEntries(globalNames.map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
@@ -342,6 +342,11 @@ test('weather rules derive day dates and describe WMO codes', () => {
   assert.equal(fmtTemp(null), '–');
   assert.equal(describeWeather(63).label, 'Dážď');
   assert.equal(describeWeather(1234).label, 'Počasie');
+  const now = new Date(2026, 6, 5, 23, 30);
+  assert.equal(localDate(now), '2026-07-05');
+  assert.equal(isPastDate('2026-07-04', now), true);
+  assert.equal(isPastDate('2026-07-05', now), false);
+  assert.equal(isPastDate('', now), false);
 });
 
 test('weather loads once per day and date, and the browser start date overrides the itinerary', async () => {
@@ -350,26 +355,52 @@ test('weather loads once per day and date, and the browser start date overrides 
     urls.push(url);
     return { ok: true, json: async () => ({ status: 'ok', weatherCode: 0, tempMax: 20, tempMin: 10 }) };
   });
-  app.current = { ...app.current, startDate: '2026-07-01', days: [{ activities: [] }, { activities: [] }] };
+  app.current = { ...app.current, startDate: '2099-07-01', days: [{ activities: [] }, { activities: [] }] };
   app.loadTripStart();
   app.dayIndex = 1;
-  assert.equal(app.dayDate, '2026-07-02');
+  assert.equal(app.dayDate, '2099-07-02');
   assert.equal(app.dayWeather, undefined);
   await app.loadWeather(0);
   await app.loadWeather(0);
-  assert.deepEqual(urls, ['/api/v1/itineraries/trip/days/1/weather?date=2026-07-02']);
+  assert.deepEqual(urls, ['/api/v1/itineraries/trip/days/1/weather?date=2099-07-02']);
   assert.equal(app.dayWeather.status, 'ok');
-  app.saveTripStart('2026-08-10');
-  assert.equal(app.dayDate, '2026-08-11');
+  app.saveTripStart('2099-08-10');
+  assert.equal(app.dayDate, '2099-08-11');
   assert.equal(app.dayWeather, undefined);
   app.saveTripStart('');
-  assert.equal(app.dayDate, '2026-07-02');
+  assert.equal(app.dayDate, '2099-07-02');
   assert.equal(app.dayWeather.status, 'ok');
 });
 
 test('disabled weather hides instead of failing', async () => {
-  const app = setup(async () => ({ ok: false, status: 404 }));
-  app.current = { ...app.current, days: [{ date: '2026-07-01', activities: [] }] };
+  const app = setup(async () => ({ ok: true, json: async () => ({ status: 'disabled' }) }));
+  app.current = { ...app.current, days: [{ date: '2099-07-01', activities: [] }] };
   await app.loadWeather(0);
   assert.equal(app.dayWeather.status, 'disabled');
+  assert.equal(app.showWeather, false);
+});
+
+test('a missing day shows the failure instead of hiding as disabled', async () => {
+  const app = setup(async () => ({ ok: false, status: 404 }));
+  app.current = { ...app.current, days: [{ date: '2099-07-01', activities: [] }] };
+  await app.loadWeather(0);
+  assert.equal(app.dayWeather, null);
+  assert.equal(app.showWeather, true);
+});
+
+test('past days neither load nor show weather, and a finished browser trip start is ignored', async () => {
+  const urls = [];
+  const app = setup(async url => { urls.push(url); return { ok: true, json: async () => ({ status: 'ok' }) }; });
+  app.current = { ...app.current, startDate: '2020-05-01', days: [{ activities: [] }, { activities: [] }] };
+  globalThis.localStorage.getItem = () => '2020-01-01';
+  app.loadTripStart();
+  assert.equal(app.tripStart, '2020-05-01');
+  assert.equal(app.isPastDay, true);
+  assert.equal(app.weatherKey, '');
+  assert.equal(app.showWeather, false);
+  await app.loadWeather(0);
+  assert.deepEqual(urls, []);
+  app.current = { ...app.current, days: [{ activities: [] }, { date: '2099-01-01', activities: [] }] };
+  app.dayIndex = 1;
+  assert.equal(app.showWeather, true);
 });

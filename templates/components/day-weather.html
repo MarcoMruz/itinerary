@@ -1,5 +1,5 @@
 {{define "day-weather"}}
-<div class="mt-4 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-stone-200 sm:p-5" x-show="day && !(dayWeather && dayWeather.status === 'disabled')" aria-label="Počasie">
+<div class="mt-4 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-stone-200 sm:p-5" x-show="showWeather" aria-label="Počasie">
   <div class="flex flex-wrap items-center justify-between gap-3">
     <h2 class="flex items-center gap-2 font-bold text-stone-900">
       <svg class="h-5 w-5 text-sky-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"/></svg>
@@ -7,7 +7,7 @@
     </h2>
     <label class="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-stone-500" x-show="day && !day.date">
       Začiatok výletu
-      <input type="date" :value="tripStart" @change="saveTripStart($event.target.value)"
+      <input type="date" :value="tripStart" :min="today" @change="saveTripStart($event.target.value)"
              class="rounded-xl border border-stone-200 bg-stone-50 px-2 py-1 text-sm font-normal normal-case tracking-normal text-stone-800 focus:border-emerald-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200">
     </label>
   </div>
@@ -29,7 +29,7 @@
           </div>
         </div>
         <ul class="flex flex-wrap gap-2 text-xs">
-          <li class="rounded-full bg-sky-50 px-3 py-1 text-sky-800 ring-1 ring-sky-200" x-show="dayWeather.precipitationChance != null || dayWeather.precipitationMm != null"
+          <li class="rounded-full bg-sky-50 px-3 py-1 text-sky-800 ring-1 ring-sky-200" x-show="dayWeather.precipitationChance != null || dayWeather.precipitationMm"
               x-text="'💧 ' + [dayWeather.precipitationChance != null ? dayWeather.precipitationChance + ' %' : '', dayWeather.precipitationMm ? fmtNumber(dayWeather.precipitationMm) + ' mm' : ''].filter(Boolean).join(' · ')"></li>
           <li class="rounded-full bg-stone-50 px-3 py-1 text-stone-700 ring-1 ring-stone-200" x-show="dayWeather.windMaxKmh != null"
               x-text="'💨 ' + Math.round(dayWeather.windMaxKmh) + ' km/h'"></li>
@@ -42,7 +42,6 @@
   </template>
   <p class="mt-3 text-sm text-stone-500" x-show="dayDate && dayWeather && dayWeather.status === 'too_far'"
      x-text="dayWeather && 'Predpoveď bude dostupná približne od ' + fmtDate(dayWeather.availableFrom) + ' (najviac 16 dní dopredu).'"></p>
-  <p class="mt-3 text-sm text-stone-500" x-show="dayDate && dayWeather && dayWeather.status === 'too_old'">Pre takto starý dátum už predpoveď nie je k dispozícii.</p>
   <p class="mt-3 text-sm text-stone-500" x-show="dayDate && dayWeather && dayWeather.status === 'not_found'">Miesto tohto dňa sa na mape nenašlo, počasie sa nezobrazí.</p>
   <p class="mt-3 text-sm text-stone-500" x-show="dayDate && dayWeather && dayWeather.status === 'no_place'">Tento deň nemá miesto na mape, počasie sa nezobrazí.</p>
   <p class="mt-3 text-[11px] text-stone-400" x-show="dayDate">Údaje: <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer" class="underline hover:text-stone-600">Open-Meteo.com</a> (CC BY 4.0)</p>

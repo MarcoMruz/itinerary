@@ -343,6 +343,8 @@ func checkURL(field, raw string) error {
 	return nil
 }
 
+const dateLayout = "2006-01-02"
+
 func checkDate(field, s string) error {
 	if s == "" {
 		return nil

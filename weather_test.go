@@ -75,16 +75,25 @@ func TestDayWeatherEndpoint(t *testing.T) {
 		t.Fatalf("repeat must be cached, upstream calls: %d", calls.Load())
 	}
 
-	_, body = do(t, "GET", base+"0/weather?date=2026-07-30", "")
-	if w := decodeWeather(t, body); w.Status != weatherTooFar || w.AvailableFrom != "2026-07-16" {
-		t.Fatalf("too far: %+v", w)
+	for date, from := range map[string]string{"2026-07-30": "2026-07-16", "2026-07-16": "2026-07-02"} {
+		_, body = do(t, "GET", base+"0/weather?date="+date, "")
+		if w := decodeWeather(t, body); w.Status != weatherTooFar || w.AvailableFrom != from {
+			t.Fatalf("too far %s: %+v", date, w)
+		}
 	}
-	_, body = do(t, "GET", base+"0/weather?date=2025-01-01", "")
-	if w := decodeWeather(t, body); w.Status != weatherTooOld {
-		t.Fatalf("too old: %+v", w)
+	for _, date := range []string{"2025-01-01", "2026-06-29"} {
+		_, body = do(t, "GET", base+"0/weather?date="+date, "")
+		if w := decodeWeather(t, body); w.Status != weatherPast {
+			t.Fatalf("past %s: %+v", date, w)
+		}
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("out-of-range dates must not reach upstream: %d", calls.Load())
+	}
+	// Yesterday in UTC may still be today at the place.
+	_, body = do(t, "GET", base+"0/weather?date=2026-06-30", "")
+	if w := decodeWeather(t, body); w.Status != weatherOK {
+		t.Fatalf("yesterday in UTC: %+v", w)
 	}
 
 	for _, path := range []string{"0/weather", "0/weather?date=03.07.2026", "0/weather?date=2026-02-30"} {
@@ -99,8 +108,25 @@ func TestDayWeatherEndpoint(t *testing.T) {
 	}
 
 	off, _ := newTestServerWith(t, API{}, SecurityConfig{})
-	if code, _ := do(t, "GET", off.URL+"/api/v1/itineraries/slovensky-raj-1yo/days/0/weather?date=2026-07-03", ""); code != 404 {
-		t.Errorf("disabled: %d", code)
+	code, body = do(t, "GET", off.URL+"/api/v1/itineraries/slovensky-raj-1yo/days/0/weather?date=2026-07-03", "")
+	if w := decodeWeather(t, body); code != 200 || w.Status != weatherDisabled {
+		t.Errorf("disabled: %d %+v", code, w)
+	}
+	if code, _ := do(t, "GET", off.URL+"/api/v1/itineraries/slovensky-raj-1yo/days/9/weather?date=2026-07-03", ""); code != 404 {
+		t.Errorf("disabled, missing day: %d", code)
+	}
+}
+
+func TestDayWeatherLimitsUncachedLookups(t *testing.T) {
+	base, calls := newWeatherServer(t, API{startLimiter: newRateLimiter(1, 1)}, http.StatusOK)
+	if code, _ := do(t, "GET", base+"0/weather?date=2026-07-03", ""); code != 200 {
+		t.Fatalf("first lookup: %d", code)
+	}
+	if code, _ := do(t, "GET", base+"0/weather?date=2026-07-04", ""); code != 429 {
+		t.Fatalf("second uncached lookup: %d", code)
+	}
+	if code, _ := do(t, "GET", base+"0/weather?date=2026-07-03", ""); code != 200 || calls.Load() != 1 {
+		t.Fatalf("cached answers stay free: %d, upstream calls %d", code, calls.Load())
 	}
 }
 

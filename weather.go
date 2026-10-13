@@ -24,8 +24,9 @@ const (
 	weatherTTL        = time.Hour
 	maxWeatherCache   = 2000 // entries; reset when full
 	forecastDays      = 16   // Open-Meteo forecasts today plus 15 days
-	pastDays          = 92   // and keeps this many past days
-	dateLayout        = "2006-01-02"
+	// Uncached fetches of all clients together, well within Open-Meteo's free 10,000 calls a day.
+	weatherFetchesPerMinute = 6
+	weatherFetchBurst       = 60
 )
 
 // Weather statuses: only "ok" carries values.
@@ -34,7 +35,8 @@ const (
 	weatherNoPlace  = "no_place"  // the day has no stop and the itinerary no startLocation
 	weatherNotFound = "not_found" // the place is unknown to OpenStreetMap
 	weatherTooFar   = "too_far"   // beyond the forecast horizon; see availableFrom
-	weatherTooOld   = "too_old"   // older than the forecast archive
+	weatherPast     = "past"      // the day is over, so no forecast is looked up
+	weatherDisabled = "disabled"  // WEATHER=false or DISTANCES=false
 )
 
 // DayWeather is the daily summary for one itinerary day.
@@ -64,6 +66,7 @@ type Weather struct {
 	url       string
 	userAgent string
 	now       func() time.Time
+	limit     *rateLimiter
 
 	mu    sync.Mutex
 	cache map[string]cachedWeather
@@ -76,6 +79,7 @@ func NewWeather(geo *Geo, userAgent string) *Weather {
 		url:       defaultWeatherURL,
 		userAgent: userAgent,
 		now:       time.Now,
+		limit:     newRateLimiter(weatherFetchesPerMinute, weatherFetchBurst),
 		cache:     map[string]cachedWeather{},
 	}
 }
@@ -83,8 +87,12 @@ func NewWeather(geo *Geo, userAgent string) *Weather {
 // ErrWeatherUnavailable means the lookup failed and a retry may succeed.
 var ErrWeatherUnavailable = errors.New("weather is temporarily unavailable")
 
-// Day returns the weather at place on date (YYYY-MM-DD).
-func (wx *Weather) Day(ctx context.Context, place, date string) (DayWeather, error) {
+// ErrWeatherLimited means too many uncached lookups; retry later.
+var ErrWeatherLimited = errors.New("too many new weather lookups, try again later")
+
+// Day returns the weather at place on date (YYYY-MM-DD). allow charges the
+// caller's budget for an uncached fetch.
+func (wx *Weather) Day(ctx context.Context, place, date string, allow func() bool) (DayWeather, error) {
 	res := DayWeather{Date: date}
 	day, err := time.Parse(dateLayout, date)
 	if err != nil {
@@ -93,15 +101,15 @@ func (wx *Weather) Day(ctx context.Context, place, date string) (DayWeather, err
 	// Compare in UTC with a day of slack: the forecast follows the place's local date.
 	today := wx.now().UTC().Truncate(24 * time.Hour)
 	switch {
+	case day.Before(today.AddDate(0, 0, -1)):
+		res.Status = weatherPast
+		return res, nil
 	case place == "":
 		res.Status = weatherNoPlace
 		return res, nil
-	case day.After(today.AddDate(0, 0, forecastDays-1)):
+	case day.After(today.AddDate(0, 0, forecastDays-2)):
 		res.Status = weatherTooFar
 		res.AvailableFrom = day.AddDate(0, 0, -(forecastDays - 2)).Format(dateLayout)
-		return res, nil
-	case day.Before(today.AddDate(0, 0, -(pastDays - 1))):
-		res.Status = weatherTooOld
 		return res, nil
 	}
 	p, ok := wx.geo.locate(ctx, place, true)
@@ -122,6 +130,12 @@ func (wx *Weather) Day(ctx context.Context, place, date string) (DayWeather, err
 	if hit && wx.now().Sub(c.fetched) < weatherTTL {
 		c.w.Place = p.Name
 		return c.w, nil
+	}
+	if !allow() {
+		return res, ErrWeatherLimited
+	}
+	if ok, _ := wx.limit.allow("*", wx.now()); !ok {
+		return res, ErrWeatherLimited
 	}
 	fetched, err := wx.fetch(ctx, *p, date)
 	if err != nil {

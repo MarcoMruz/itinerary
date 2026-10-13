@@ -283,14 +283,15 @@ func (a *API) getDayLegs(w http.ResponseWriter, r *http.Request) {
 // (else the startLocation). ?date= overrides the stored date, so visitors can
 // see the weather for trips that have no dates yet.
 func (a *API) getDayWeather(w http.ResponseWriter, r *http.Request) {
-	if a.weather == nil {
-		writeError(w, http.StatusNotFound, "weather is disabled")
-		return
-	}
 	it, ok := a.store.Get(r.PathValue("id"))
 	day, err := strconv.Atoi(r.PathValue("day"))
 	if !ok || err != nil || day < 0 || day >= len(it.Days) {
 		writeError(w, http.StatusNotFound, "itinerary day not found")
+		return
+	}
+	// 200, not 404, so clients can tell a disabled feature from a missing day.
+	if a.weather == nil {
+		writeJSON(w, http.StatusOK, DayWeather{Status: weatherDisabled})
 		return
 	}
 	date := r.URL.Query().Get("date")
@@ -303,17 +304,30 @@ func (a *API) getDayWeather(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), legsTimeout)
 	defer cancel()
-	res, err := a.weather.Day(ctx, it.WeatherPlace(day), date)
-	if errors.Is(err, ErrWeatherUnavailable) {
+	res, err := a.weather.Day(ctx, it.WeatherPlace(day), date, func() bool { return a.allowStartLookup(r) })
+	switch {
+	case errors.Is(err, ErrWeatherLimited):
+		w.Header().Set("Retry-After", "10")
+		writeError(w, http.StatusTooManyRequests, err.Error())
+		return
+	case errors.Is(err, ErrWeatherUnavailable):
 		w.Header().Set("Retry-After", "10")
 		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
-	}
-	if err != nil {
+	case err != nil:
 		writeErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+// allowStartLookup charges one uncached lookup to the client's START_LOOKUPS_PER_MINUTE budget.
+func (a *API) allowStartLookup(r *http.Request) bool {
+	if a.startLimiter == nil {
+		return true
+	}
+	ok, _ := a.startLimiter.allow(clientIP(r, a.ipHeader), time.Now())
+	return ok
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -421,8 +435,8 @@ func (a *API) openAPI(w http.ResponseWriter, r *http.Request) {
 						{"name": "date", "in": "query", "schema": schema{"type": "string", "format": "date"}, "description": "Date to forecast; defaults to the day's date or startDate + day"},
 					},
 					"responses": schema{
-						"200": resp("Weather; status ok carries values, otherwise no_place, not_found, too_far (see availableFrom) or too_old", schema{"type": "object"}),
-						"400": errResp("Missing or invalid date"), "404": errResp("Not found or weather disabled"), "503": errResp("Weather service unavailable, retry later"),
+						"200": resp("Weather; status ok carries values, otherwise disabled, past, no_place, not_found or too_far (see availableFrom)", schema{"type": "object"}),
+						"400": errResp("Missing or invalid date"), "404": errResp("Itinerary day not found"), "429": errResp("Too many new lookups, retry later"), "503": errResp("Weather service unavailable, retry later"),
 					},
 				}),
 			},

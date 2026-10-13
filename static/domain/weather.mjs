@@ -40,6 +40,16 @@ export function dayDate(days, index, tripStart) {
   return date.toISOString().slice(0, 10);
 }
 
+// The visitor's local calendar date as YYYY-MM-DD.
+export function localDate(now = new Date()) {
+  return [now.getFullYear(), now.getMonth() + 1, now.getDate()].map(n => String(n).padStart(2, '0')).join('-');
+}
+
+// ISO dates compare as strings; '' is never past.
+export function isPastDate(iso, now = new Date()) {
+  return !!iso && iso < localDate(now);
+}
+
 const weekdays = ['ne', 'po', 'ut', 'st', 'št', 'pi', 'so'];
 
 export function fmtDate(iso) {
