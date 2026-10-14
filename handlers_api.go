@@ -318,6 +318,10 @@ func (a *API) getDayWeather(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	// The browser reuses the answer until the server cache entry expires, so both stay in step.
+	if maxAge := int(res.expires.Sub(a.weather.now()).Seconds()); maxAge > 0 {
+		w.Header().Set("Cache-Control", "private, max-age="+strconv.Itoa(maxAge))
+	}
 	writeJSON(w, http.StatusOK, res)
 }
 

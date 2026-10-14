@@ -349,7 +349,7 @@ test('weather rules derive day dates and describe WMO codes', () => {
   assert.equal(isPastDate('', now), false);
 });
 
-test('weather loads once per day and date, and the browser start date overrides the itinerary', async () => {
+test('concurrent weather loads share one request, and the browser start date overrides the itinerary', async () => {
   const urls = [];
   const app = setup(async url => {
     urls.push(url);
@@ -360,9 +360,8 @@ test('weather loads once per day and date, and the browser start date overrides 
   app.dayIndex = 1;
   assert.equal(app.dayDate, '2099-07-02');
   assert.equal(app.dayWeather, undefined);
-  await app.loadWeather(0);
-  await app.loadWeather(0);
-  assert.deepEqual(urls, ['/api/v1/itineraries/trip/days/1/weather?date=2099-07-02']);
+  await Promise.all([app.loadWeather(0), app.loadWeather(0)]);
+  assert.deepEqual(urls, ['/api/v1/itineraries/trip/days/1/weather?date=2099-07-02&place=']);
   assert.equal(app.dayWeather.status, 'ok');
   app.saveTripStart('2099-08-10');
   assert.equal(app.dayDate, '2099-08-11');
@@ -422,23 +421,14 @@ test('weather invalidates when the first stop or fallback start location changes
   assert.equal(app.dayWeather.tempMax, 4);
 });
 
-test('weather and too-far answers expire after an hour', async t => {
-  let now = Date.now();
-  t.mock.method(Date, 'now', () => now);
-  const app = setup(async () => ({ ok: true, json: async () => ({ status: 'too_far' }) }));
-  app.current = { ...app.current, days: [{ date: '2099-07-01', activities: [] }] };
+test('every weather load asks the browser HTTP cache, keyed by the place', async () => {
+  const urls = [];
+  const app = setup(async url => { urls.push(url); return { ok: true, json: async () => ({ status: 'ok', tempMax: urls.length }) }; });
+  app.current = { ...app.current, days: [{ date: '2099-07-01', activities: [{ place: 'Štrbské Pleso' }] }] };
   await app.loadWeather(0);
-  globalThis.fetch = async () => ({ ok: true, json: async () => ({ status: 'ok', tempMax: 20 }) });
-  now += 3600000;
   await app.loadWeather(0);
-  assert.equal(app.dayWeather.status, 'ok');
-  globalThis.fetch = async () => ({ ok: true, json: async () => ({ status: 'ok', tempMax: 25 }) });
-  now += 3599999;
-  await app.loadWeather(0);
-  assert.equal(app.dayWeather.tempMax, 20);
-  now += 1;
-  await app.loadWeather(0);
-  assert.equal(app.dayWeather.tempMax, 25);
+  assert.equal(app.dayWeather.tempMax, 2);
+  assert.deepEqual(urls, Array(2).fill('/api/v1/itineraries/trip/days/0/weather?date=2099-07-01&place=%C5%A0trbsk%C3%A9%20Pleso'));
 });
 
 test('returning to the tab refreshes weather without polling', () => {

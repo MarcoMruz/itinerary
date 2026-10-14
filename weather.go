@@ -53,11 +53,8 @@ type DayWeather struct {
 	WindMaxKmh          *float64 `json:"windMaxKmh,omitempty"`
 	Sunrise             string   `json:"sunrise,omitempty"` // local time HH:MM
 	Sunset              string   `json:"sunset,omitempty"`
-}
 
-type cachedWeather struct {
-	w       DayWeather
-	fetched time.Time
+	expires time.Time // when this answer goes stale, for Cache-Control
 }
 
 type weatherCall struct {
@@ -75,7 +72,7 @@ type Weather struct {
 	limit     *rateLimiter
 
 	mu       sync.Mutex
-	cache    map[string]cachedWeather
+	cache    map[string]DayWeather
 	inFlight map[string]*weatherCall
 }
 
@@ -87,7 +84,7 @@ func NewWeather(geo *Geo, userAgent string) *Weather {
 		userAgent: userAgent,
 		now:       time.Now,
 		limit:     newRateLimiter(weatherFetchesPerMinute, weatherFetchBurst),
-		cache:     map[string]cachedWeather{},
+		cache:     map[string]DayWeather{},
 		inFlight:  map[string]*weatherCall{},
 	}
 }
@@ -101,7 +98,7 @@ var ErrWeatherLimited = errors.New("too many new weather lookups, try again late
 // Day returns the weather at place on date (YYYY-MM-DD). allow charges the
 // caller's budget for an uncached fetch.
 func (wx *Weather) Day(ctx context.Context, place, date string, allow func() bool) (DayWeather, error) {
-	res := DayWeather{Date: date}
+	res := DayWeather{Date: date, expires: wx.now().Add(weatherTTL)}
 	day, err := time.Parse(dateLayout, date)
 	if err != nil {
 		return res, invalid("date must be YYYY-MM-DD")
@@ -143,10 +140,9 @@ func (wx *Weather) Day(ctx context.Context, place, date string, allow func() boo
 func (wx *Weather) forecast(ctx context.Context, p point, date string, allow func() bool) (DayWeather, error) {
 	key := fmt.Sprintf("%.4f,%.4f,%s", p.Lat, p.Lon, date)
 	wx.mu.Lock()
-	c, hit := wx.cache[key]
-	if hit && wx.now().Sub(c.fetched) < weatherTTL {
+	if c, hit := wx.cache[key]; hit && wx.now().Before(c.expires) {
 		wx.mu.Unlock()
-		return c.w, nil
+		return c, nil
 	}
 	if call, ok := wx.inFlight[key]; ok {
 		wx.mu.Unlock()
@@ -165,9 +161,10 @@ func (wx *Weather) forecast(ctx context.Context, p point, date string, allow fun
 	wx.mu.Lock()
 	if call.err == nil {
 		if len(wx.cache) >= maxWeatherCache {
-			wx.cache = map[string]cachedWeather{}
+			wx.cache = map[string]DayWeather{}
 		}
-		wx.cache[key] = cachedWeather{call.w, wx.now()}
+		call.w.expires = wx.now().Add(weatherTTL)
+		wx.cache[key] = call.w
 	}
 	delete(wx.inFlight, key)
 	close(call.done)

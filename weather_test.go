@@ -61,6 +61,16 @@ func decodeWeather(t *testing.T, body []byte) DayWeather {
 	return w
 }
 
+func cacheControl(t *testing.T, url string) string {
+	t.Helper()
+	res, err := http.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	return res.Header.Get("Cache-Control")
+}
+
 func TestDayWeatherEndpoint(t *testing.T) {
 	base, calls := newWeatherServer(t, API{}, http.StatusOK)
 
@@ -75,6 +85,12 @@ func TestDayWeatherEndpoint(t *testing.T) {
 	}
 	if do(t, "GET", base+"1/weather?date=2026-07-03", ""); calls.Load() != 1 {
 		t.Fatalf("repeat must be cached, upstream calls: %d", calls.Load())
+	}
+	if cc := cacheControl(t, base+"1/weather?date=2026-07-03"); cc != "private, max-age=3600" {
+		t.Errorf("fresh answer Cache-Control: %q", cc)
+	}
+	if cc := cacheControl(t, base+"9/weather?date=2026-07-03"); cc != "no-store" {
+		t.Errorf("error Cache-Control: %q", cc)
 	}
 
 	for date, from := range map[string]string{"2026-07-30": "2026-07-16", "2026-07-16": "2026-07-02"} {
@@ -113,6 +129,9 @@ func TestDayWeatherEndpoint(t *testing.T) {
 	code, body = do(t, "GET", off.URL+"/api/v1/itineraries/slovensky-raj-1yo/days/0/weather?date=2026-07-03", "")
 	if w := decodeWeather(t, body); code != 200 || w.Status != weatherDisabled {
 		t.Errorf("disabled: %d %+v", code, w)
+	}
+	if cc := cacheControl(t, off.URL+"/api/v1/itineraries/slovensky-raj-1yo/days/0/weather?date=2026-07-03"); cc != "no-store" {
+		t.Errorf("disabled Cache-Control: %q", cc)
 	}
 	if code, _ := do(t, "GET", off.URL+"/api/v1/itineraries/slovensky-raj-1yo/days/9/weather?date=2026-07-03", ""); code != 404 {
 		t.Errorf("disabled, missing day: %d", code)
@@ -289,8 +308,9 @@ func TestWeatherCacheExpiresAndSharesCoordinates(t *testing.T) {
 		t.Fatal(err)
 	}
 	now = now.Add(weatherTTL - time.Second)
-	if w, err := wx.Day(context.Background(), "Shore", "2026-07-03", func() bool { return false }); err != nil || w.Place != "Shore" || calls.Load() != 1 {
-		t.Fatalf("cached alias: %+v, err=%v, calls=%d", w, err, calls.Load())
+	if w, err := wx.Day(context.Background(), "Shore", "2026-07-03", func() bool { return false }); err != nil || w.Place != "Shore" || calls.Load() != 1 ||
+		!w.expires.Equal(weatherToday.Add(weatherTTL)) {
+		t.Fatalf("cached alias keeps its first expiry: %+v, err=%v, calls=%d", w, err, calls.Load())
 	}
 	now = now.Add(time.Second)
 	if _, err := wx.Day(context.Background(), "Lake", "2026-07-03", func() bool { return true }); err != nil || calls.Load() != 2 {
