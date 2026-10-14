@@ -1,6 +1,6 @@
 import { insightCount } from './insights.mjs';
 
-export const fieldLabels = { title: 'názov', subtitle: 'podnadpis', duration: 'dĺžka', targetAudience: 'pre koho', startLocation: 'štart', mapsUrl: 'odkaz na mapu', days: 'program dní', checklist: 'checklist', localGuide: 'miestny sprievodca' };
+export const fieldLabels = { title: 'názov', subtitle: 'podnadpis', duration: 'dĺžka', targetAudience: 'pre koho', startLocation: 'štart', startDate: 'dátum začiatku', mapsUrl: 'odkaz na mapu', days: 'program dní', checklist: 'checklist', localGuide: 'miestny sprievodca' };
 
 export const insiderAsk = 'Buď náš miestny sprievodca: niekto, kto v cieli roky žije a plánuje tento výlet osobne pre nás. ' +
   'Urob hĺbkový prieskum (miestne fóra, čerstvé recenzie, miestne a dopravné weby, zdroje v miestnom jazyku) a ku každému miestu dopíš to, ' +

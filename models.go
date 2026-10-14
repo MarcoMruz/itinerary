@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -43,6 +44,7 @@ type LocalGuide struct {
 // Day groups activities under a label such as "Piatok" or "Deň 1".
 type Day struct {
 	Label      string     `json:"label"`
+	Date       string     `json:"date,omitempty"` // YYYY-MM-DD; overrides the date derived from the itinerary startDate
 	Activities []Activity `json:"activities"`
 }
 
@@ -66,6 +68,7 @@ type Itinerary struct {
 	Duration       string      `json:"duration,omitempty"`
 	TargetAudience string      `json:"targetAudience,omitempty"`
 	StartLocation  string      `json:"startLocation,omitempty"` // default origin of every day route, e.g. the hotel
+	StartDate      string      `json:"startDate,omitempty"`     // YYYY-MM-DD of the first day; later days follow one per day
 	MapsURL        string      `json:"mapsUrl,omitempty"`
 	Days           []Day       `json:"days"`
 	Checklist      []string    `json:"checklist"`
@@ -79,6 +82,26 @@ type Summary struct {
 	Subtitle       string `json:"subtitle,omitempty"`
 	Duration       string `json:"duration,omitempty"`
 	TargetAudience string `json:"targetAudience,omitempty"`
+}
+
+// DayDate is the calendar date of day i: its own date, else startDate + i; "" when unknown.
+func (it *Itinerary) DayDate(i int) string {
+	if d := it.Days[i].Date; d != "" {
+		return d
+	}
+	start, err := time.Parse(dateLayout, it.StartDate)
+	if err != nil {
+		return ""
+	}
+	return start.AddDate(0, 0, i).Format(dateLayout)
+}
+
+// WeatherPlace is where the weather of day i is looked up: its first stop, else the startLocation.
+func (it *Itinerary) WeatherPlace(i int) string {
+	if stops := it.Days[i].RouteStops(); len(stops) > 0 {
+		return stops[0]
+	}
+	return it.StartLocation
 }
 
 func (it *Itinerary) Summary() Summary {
@@ -115,7 +138,7 @@ func (it *Itinerary) Normalize() error {
 		name string
 		v    *string
 	}{{"id", &it.ID}, {"title", &it.Title}, {"subtitle", &it.Subtitle}, {"duration", &it.Duration},
-		{"targetAudience", &it.TargetAudience}, {"startLocation", &it.StartLocation}, {"mapsUrl", &it.MapsURL}} {
+		{"targetAudience", &it.TargetAudience}, {"startLocation", &it.StartLocation}, {"startDate", &it.StartDate}, {"mapsUrl", &it.MapsURL}} {
 		if err := cleanText(f.name, f.v); err != nil {
 			return err
 		}
@@ -130,6 +153,9 @@ func (it *Itinerary) Normalize() error {
 		return invalid("id %q must be a lowercase slug (a-z, 0-9, '-'), max 64 chars", it.ID)
 	}
 	if err := checkURL("mapsUrl", it.MapsURL); err != nil {
+		return err
+	}
+	if err := checkDate("startDate", it.StartDate); err != nil {
 		return err
 	}
 	if len(it.Days) == 0 || len(it.Days) > maxDays {
@@ -174,6 +200,12 @@ func (d *Day) normalize(i int) error {
 	}
 	if d.Label == "" {
 		d.Label = fmt.Sprintf("Deň %d", i+1)
+	}
+	if err := cleanText(field+".date", &d.Date); err != nil {
+		return err
+	}
+	if err := checkDate(field+".date", d.Date); err != nil {
+		return err
 	}
 	if len(d.Activities) > maxActivities {
 		return invalid("%s.activities may contain at most %d items", field, maxActivities)
@@ -311,6 +343,18 @@ func checkURL(field, raw string) error {
 	return nil
 }
 
+const dateLayout = "2006-01-02"
+
+func checkDate(field, s string) error {
+	if s == "" {
+		return nil
+	}
+	if _, err := time.Parse(dateLayout, s); err != nil {
+		return invalid("%s must be a date as YYYY-MM-DD", field)
+	}
+	return nil
+}
+
 var diacritics = strings.NewReplacer(
 	"á", "a", "ä", "a", "č", "c", "ď", "d", "é", "e", "ě", "e", "í", "i", "ĺ", "l", "ľ", "l",
 	"ň", "n", "ó", "o", "ô", "o", "ö", "o", "ŕ", "r", "ř", "r", "š", "s", "ť", "t", "ú", "u",
@@ -415,6 +459,7 @@ var itinerarySchema = schema{
 		"duration":       strProp("Human readable length; derived from day count when omitted"),
 		"targetAudience": strProp("Who the trip is for, e.g. '2 adults + 1-year-old'"),
 		"startLocation":  strProp("Optional origin of every day route, e.g. the hotel you stay at, given as its official name or street address (same rules as activity place); empty = traveller's current location"),
+		"startDate":      schema{"type": "string", "format": "date", "description": "Optional date of the first day (YYYY-MM-DD); later days follow one per day. Enables the daily weather forecast"},
 		"mapsUrl":        strProp("Absolute http(s) Google Maps route link for the whole trip"),
 		"days": schema{
 			"type": "array", "minItems": 1, "maxItems": maxDays,
@@ -423,6 +468,7 @@ var itinerarySchema = schema{
 				"required": []string{"activities"},
 				"properties": schema{
 					"label":      strProp("Day label, e.g. 'Piatok'; defaults to 'Deň N'"),
+					"date":       schema{"type": "string", "format": "date", "description": "Optional date of this day (YYYY-MM-DD) when it does not follow startDate"},
 					"activities": schema{"type": "array", "maxItems": maxActivities, "items": activitySchema},
 				},
 			},

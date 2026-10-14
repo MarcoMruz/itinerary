@@ -5,8 +5,9 @@ import { checklistChanges, checklistProgress } from './static/domain/checklist.m
 import { activityRoute, fmtLeg, totalLegs } from './static/domain/routes.mjs';
 import { chatMessage, exportUrl, previewStats } from './static/domain/import-export.mjs';
 import { hostname, insightPage, parseHash, viewHash } from './static/domain/insights.mjs';
+import { dayDate, describeWeather, fmtDate, fmtTemp, isPastDate, localDate } from './static/domain/weather.mjs';
 
-const globalNames = ['localStorage', 'fetch', 'navigator', 'window', 'location', 'history'];
+const globalNames = ['localStorage', 'fetch', 'navigator', 'window', 'location', 'history', 'document'];
 const originalGlobals = Object.fromEntries(globalNames.map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
 afterEach(() => globalNames.forEach(name => {
   if (originalGlobals[name]) Object.defineProperty(globalThis, name, originalGlobals[name]);
@@ -326,4 +327,124 @@ test('a stale tip link falls back to the program without changing the day', () =
   location.hash = '#trip/guide';
   app.openGuide();
   assert.equal(app.pagesOpened, 0);
+});
+
+test('weather rules derive day dates and describe WMO codes', () => {
+  const days = Object.freeze([{}, { date: '2026-08-01' }, {}]);
+  assert.equal(dayDate(days, 0, '2026-07-30'), '2026-07-30');
+  assert.equal(dayDate(days, 1, '2026-07-30'), '2026-08-01');
+  assert.equal(dayDate(days, 2, '2026-12-30'), '2027-01-01');
+  assert.equal(dayDate(days, 0, ''), '');
+  assert.equal(dayDate(days, 0, 'tomorrow'), '');
+  assert.equal(dayDate(days, 5, '2026-07-30'), '');
+  assert.equal(fmtDate('2026-10-16'), 'pi 16. 10.');
+  assert.equal(fmtTemp(12.6), '13 °C');
+  assert.equal(fmtTemp(null), '–');
+  assert.equal(describeWeather(63).label, 'Dážď');
+  assert.equal(describeWeather(1234).label, 'Počasie');
+  const now = new Date(2026, 6, 5, 23, 30);
+  assert.equal(localDate(now), '2026-07-05');
+  assert.equal(isPastDate('2026-07-04', now), true);
+  assert.equal(isPastDate('2026-07-05', now), false);
+  assert.equal(isPastDate('', now), false);
+});
+
+test('concurrent weather loads share one request, and the browser start date overrides the itinerary', async () => {
+  const urls = [];
+  const app = setup(async url => {
+    urls.push(url);
+    return { ok: true, json: async () => ({ status: 'ok', weatherCode: 0, tempMax: 20, tempMin: 10 }) };
+  });
+  app.current = { ...app.current, startDate: '2099-07-01', days: [{ activities: [] }, { activities: [] }] };
+  app.loadTripStart();
+  app.dayIndex = 1;
+  assert.equal(app.dayDate, '2099-07-02');
+  assert.equal(app.dayWeather, undefined);
+  await Promise.all([app.loadWeather(0), app.loadWeather(0)]);
+  assert.deepEqual(urls, ['/api/v1/itineraries/trip/days/1/weather?date=2099-07-02&place=']);
+  assert.equal(app.dayWeather.status, 'ok');
+  app.saveTripStart('2099-08-10');
+  assert.equal(app.dayDate, '2099-08-11');
+  assert.equal(app.dayWeather, undefined);
+  app.saveTripStart('');
+  assert.equal(app.dayDate, '2099-07-02');
+  assert.equal(app.dayWeather.status, 'ok');
+});
+
+test('disabled weather hides instead of failing', async () => {
+  const app = setup(async () => ({ ok: true, json: async () => ({ status: 'disabled' }) }));
+  app.current = { ...app.current, days: [{ date: '2099-07-01', activities: [] }] };
+  await app.loadWeather(0);
+  assert.equal(app.dayWeather.status, 'disabled');
+  assert.equal(app.showWeather, false);
+});
+
+test('a missing day shows the failure instead of hiding as disabled', async () => {
+  const app = setup(async () => ({ ok: false, status: 404 }));
+  app.current = { ...app.current, days: [{ date: '2099-07-01', activities: [] }] };
+  await app.loadWeather(0);
+  assert.equal(app.dayWeather, null);
+  assert.equal(app.showWeather, true);
+});
+
+test('past days neither load nor show weather, and a finished browser trip start is ignored', async () => {
+  const urls = [];
+  const app = setup(async url => { urls.push(url); return { ok: true, json: async () => ({ status: 'ok' }) }; });
+  app.current = { ...app.current, startDate: '2020-05-01', days: [{ activities: [] }, { activities: [] }] };
+  globalThis.localStorage.getItem = () => '2020-01-01';
+  app.loadTripStart();
+  assert.equal(app.tripStart, '2020-05-01');
+  assert.equal(app.isPastDay, true);
+  assert.equal(app.weatherKey, '');
+  assert.equal(app.showWeather, false);
+  await app.loadWeather(0);
+  assert.deepEqual(urls, []);
+  app.current = { ...app.current, days: [{ activities: [] }, { date: '2099-01-01', activities: [] }] };
+  app.dayIndex = 1;
+  assert.equal(app.showWeather, true);
+});
+
+test('weather invalidates when the first stop or fallback start location changes', async () => {
+  let calls = 0;
+  const app = setup(async () => ({ ok: true, json: async () => ({ status: 'ok', tempMax: ++calls }) }));
+  app.current = { ...app.current, days: [{ date: '2099-07-01', activities: [{ place: 'Bratislava' }] }] };
+  await app.loadWeather(0);
+  app.current = { ...app.current, days: [{ date: '2099-07-01', activities: [{ place: 'Tokyo' }] }] };
+  assert.equal(app.dayWeather, undefined);
+  await app.loadWeather(0);
+  assert.equal(app.dayWeather.tempMax, 2);
+  app.current = { ...app.current, startLocation: 'Hotel A', days: [{ date: '2099-07-01', activities: [] }] };
+  await app.loadWeather(0);
+  app.current = { ...app.current, startLocation: 'Hotel B' };
+  assert.equal(app.dayWeather, undefined);
+  await app.loadWeather(0);
+  assert.equal(app.dayWeather.tempMax, 4);
+});
+
+test('every weather load asks the browser HTTP cache, keyed by the place', async () => {
+  const urls = [];
+  const app = setup(async url => { urls.push(url); return { ok: true, json: async () => ({ status: 'ok', tempMax: urls.length }) }; });
+  app.current = { ...app.current, days: [{ date: '2099-07-01', activities: [{ place: 'Štrbské Pleso' }] }] };
+  await app.loadWeather(0);
+  await app.loadWeather(0);
+  assert.equal(app.dayWeather.tempMax, 2);
+  assert.deepEqual(urls, Array(2).fill('/api/v1/itineraries/trip/days/0/weather?date=2099-07-01&place=%C5%A0trbsk%C3%A9%20Pleso'));
+});
+
+test('returning to the tab refreshes weather without polling', () => {
+  const app = setup(async () => ({}));
+  let onVisibility, loads = 0;
+  globalThis.document = { visibilityState: 'hidden', addEventListener: (name, callback) => { onVisibility = callback; } };
+  globalThis.window.addEventListener = () => {};
+  app.$watch = () => {};
+  app.checkChecklistAccess = () => {};
+  app.refreshList = () => {};
+  app.loadWeather = () => { loads += 1; };
+  app.init();
+  assert.equal(loads, 1);
+  onVisibility();
+  assert.equal(loads, 1);
+  document.visibilityState = 'visible';
+  onVisibility();
+  assert.equal(loads, 2);
 });

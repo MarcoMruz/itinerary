@@ -3,6 +3,7 @@ import { importExport } from './features/import-export.mjs';
 import { insights } from './features/insights.mjs';
 import { routes } from './features/routes.mjs';
 import { sharing } from './features/sharing.mjs';
+import { weather } from './features/weather.mjs';
 import { parseHash, viewHash } from './domain/insights.mjs';
 
 export function itineraryApp(boot = {}) {
@@ -20,16 +21,22 @@ export function itineraryApp(boot = {}) {
     init() {
       this.loadChecked();
       this.loadStart();
+      this.loadTripStart();
       this.openFromHash();
       this.checkChecklistAccess();
       this.$watch('legsKey', () => this.loadLegs(0));
       this.loadLegs(0);
+      this.$watch('weatherKey', () => this.loadWeather(0));
+      this.loadWeather(0);
       window.addEventListener('hashchange', () => this.openFromHash());
       window.addEventListener('beforeunload', event => {
         if (this.editingChecklist) { event.preventDefault(); event.returnValue = ''; }
       });
       document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') this.refreshList();
+        if (document.visibilityState === 'visible') {
+          this.refreshList();
+          this.loadWeather(0);
+        }
       });
     },
     get day() { return this.current ? this.current.days[this.dayIndex] : null; },
@@ -74,6 +81,7 @@ export function itineraryApp(boot = {}) {
       this.showView(view);
       this.loadChecked();
       this.loadStart();
+      this.loadTripStart();
     },
     startSignIn() {
       // The login page drops the URL, so hand the itinerary over to the signed-in page.
@@ -88,5 +96,5 @@ export function itineraryApp(boot = {}) {
     },
   };
   // Preserve reactive getters; object spread would evaluate them before Alpine binds the app.
-  return Object.defineProperties(app, Object.assign({}, ...[checklist(), routes(), sharing(), importExport(), insights()].map(Object.getOwnPropertyDescriptors)));
+  return Object.defineProperties(app, Object.assign({}, ...[checklist(), routes(), weather(), sharing(), importExport(), insights()].map(Object.getOwnPropertyDescriptors)));
 }
