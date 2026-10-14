@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -118,7 +120,7 @@ func TestDayWeatherEndpoint(t *testing.T) {
 }
 
 func TestDayWeatherLimitsUncachedLookups(t *testing.T) {
-	base, calls := newWeatherServer(t, API{startLimiter: newRateLimiter(1, 1)}, http.StatusOK)
+	base, calls := newWeatherServer(t, API{startLimiter: newRateLimiter(1, 2)}, http.StatusOK)
 	if code, _ := do(t, "GET", base+"0/weather?date=2026-07-03", ""); code != 200 {
 		t.Fatalf("first lookup: %d", code)
 	}
@@ -183,5 +185,115 @@ func TestDayWeatherNeedsReadAccess(t *testing.T) {
 	}
 	if code, _ := do(t, "GET", base+"0/weather?date=2026-07-03", "", "Authorization", "Bearer secret"); code != 200 {
 		t.Fatalf("with token: %d", code)
+	}
+}
+
+func TestWeatherExhaustedBudgetAvoidsGeocoding(t *testing.T) {
+	upstream, calls := fakeGeo(t)
+	g := newFakeGeo(t, upstream.URL, filepath.Join(t.TempDir(), "geo.json"))
+	wx := NewWeather(g, "test-agent")
+	wx.now = func() time.Time { return weatherToday }
+	_, err := wx.Day(context.Background(), "Lake", "2026-07-03", func() bool { return false })
+	if !errors.Is(err, ErrWeatherLimited) || calls.Load() != 0 {
+		t.Fatalf("exhausted budget: err=%v, geocode calls=%d", err, calls.Load())
+	}
+}
+
+func TestWeatherCoalescesConcurrentForecasts(t *testing.T) {
+	g := NewGeo("", "test-agent")
+	g.disk.Places[placeKey("Lake")] = &point{Lat: 48, Lon: 20, Name: "Lake"}
+	entered := make(chan struct{}, 2)
+	release := make(chan struct{})
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		entered <- struct{}{}
+		<-release
+		w.Write([]byte(`{"daily":{"time":["2026-07-03"],"temperature_2m_max":[25]}}`))
+	}))
+	t.Cleanup(upstream.Close)
+	wx := NewWeather(g, "test-agent")
+	wx.url, wx.now = upstream.URL, func() time.Time { return weatherToday }
+	var charges atomic.Int32
+	done := make(chan error, 2)
+	request := func() {
+		_, err := wx.Day(context.Background(), "Lake", "2026-07-03", func() bool { charges.Add(1); return true })
+		done <- err
+	}
+	go request()
+	<-entered
+	go request()
+	select {
+	case <-entered:
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	for range 2 {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls.Load() != 1 || charges.Load() != 1 {
+		t.Fatalf("same forecast: upstream calls=%d, budget charges=%d; want 1 each", calls.Load(), charges.Load())
+	}
+}
+
+func TestWeatherWaiterCancellationDoesNotBlockOtherDates(t *testing.T) {
+	g := NewGeo("", "test-agent")
+	g.disk.Places[placeKey("Lake")] = &point{Lat: 48, Lon: 20, Name: "Lake"}
+	entered, release := make(chan struct{}), make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		date := r.URL.Query().Get("start_date")
+		if date == "2026-07-03" {
+			close(entered)
+			<-release
+		}
+		json.NewEncoder(w).Encode(map[string]any{"daily": map[string]any{"time": []string{date}}})
+	}))
+	t.Cleanup(upstream.Close)
+	defer close(release)
+	wx := NewWeather(g, "test-agent")
+	wx.url, wx.now = upstream.URL, func() time.Time { return weatherToday }
+	first := make(chan error, 1)
+	go func() {
+		_, err := wx.Day(context.Background(), "Lake", "2026-07-03", func() bool { return true })
+		first <- err
+	}()
+	t.Cleanup(func() {
+		if err := <-first; err != nil {
+			t.Errorf("original lookup: %v", err)
+		}
+	})
+	<-entered
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := wx.Day(ctx, "Lake", "2026-07-03", func() bool { t.Error("waiter charged"); return false }); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled waiter: %v", err)
+	}
+	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if w, err := wx.Day(ctx, "Lake", "2026-07-04", func() bool { return true }); err != nil || w.Status != weatherOK {
+		t.Fatalf("unrelated date blocked: %+v, %v", w, err)
+	}
+}
+
+func TestWeatherCacheExpiresAndSharesCoordinates(t *testing.T) {
+	g := NewGeo("", "test-agent")
+	g.disk.Places[placeKey("Lake")] = &point{Lat: 48, Lon: 20, Name: "Lake"}
+	g.disk.Places[placeKey("Shore")] = &point{Lat: 48, Lon: 20, Name: "Shore"}
+	upstream, calls := fakeOpenMeteo(t, http.StatusOK)
+	wx := NewWeather(g, "test-agent")
+	now := weatherToday
+	wx.url, wx.now = upstream.URL, func() time.Time { return now }
+	if _, err := wx.Day(context.Background(), "Lake", "2026-07-03", func() bool { return true }); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(weatherTTL - time.Second)
+	if w, err := wx.Day(context.Background(), "Shore", "2026-07-03", func() bool { return false }); err != nil || w.Place != "Shore" || calls.Load() != 1 {
+		t.Fatalf("cached alias: %+v, err=%v, calls=%d", w, err, calls.Load())
+	}
+	now = now.Add(time.Second)
+	if _, err := wx.Day(context.Background(), "Lake", "2026-07-03", func() bool { return true }); err != nil || calls.Load() != 2 {
+		t.Fatalf("expired cache: err=%v, calls=%d", err, calls.Load())
 	}
 }

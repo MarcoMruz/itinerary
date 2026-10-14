@@ -1,5 +1,7 @@
 import { dayDate, describeWeather, fmtDate, fmtNumber, fmtTemp, isPastDate, localDate } from '../domain/weather.mjs';
 
+const weatherTTL = 60 * 60 * 1000;
+
 export function weather() {
   const inFlight = new Set();
   return {
@@ -10,10 +12,11 @@ export function weather() {
     get dayDate() { return this.current ? dayDate(this.current.days, this.dayIndex, this.tripStart) : ''; },
     get isPastDay() { return isPastDate(this.dayDate); },
     get weatherKey() {
-      return this.current && this.dayDate && !this.isPastDay ? JSON.stringify([this.current.id, this.dayIndex, this.dayDate]) : '';
+      const place = this.day?.activities.find(activity => activity.place)?.place || this.current?.startLocation || '';
+      return this.current && this.dayDate && !this.isPastDay ? JSON.stringify([this.current.id, this.dayIndex, this.dayDate, place]) : '';
     },
     // undefined while loading, null after a failure, otherwise the server answer.
-    get dayWeather() { return this.weatherByKey[this.weatherKey]; },
+    get dayWeather() { return this.weatherByKey[this.weatherKey]?.data; },
     get showWeather() {
       const status = this.dayWeather && this.dayWeather.status;
       return !!this.day && !this.isPastDay && status !== 'disabled' && status !== 'past';
@@ -22,7 +25,8 @@ export function weather() {
 
     async loadWeather(attempt) {
       const key = this.weatherKey;
-      if (!key || this.weatherByKey[key] || (attempt === 0 && inFlight.has(key))) return;
+      const cached = this.weatherByKey[key];
+      if (!key || (cached?.data && Date.now() - cached.fetched < weatherTTL) || (attempt === 0 && inFlight.has(key))) return;
       inFlight.add(key);
       let retryIn = 0;
       try {
@@ -30,11 +34,12 @@ export function weather() {
           '/weather?date=' + encodeURIComponent(this.dayDate);
         const response = await fetch(url, { headers: { Accept: 'application/json' } });
         if (response.ok) {
-          this.weatherByKey = { ...this.weatherByKey, [key]: await response.json() };
+          const data = await response.json();
+          this.weatherByKey = { ...this.weatherByKey, [key]: { data, fetched: Date.now() } };
         } else if (response.status === 429 || response.status >= 500) {
           retryIn = Number(response.headers.get('Retry-After')) || 5;
         } else {
-          this.weatherByKey = { ...this.weatherByKey, [key]: null };
+          this.weatherByKey = { ...this.weatherByKey, [key]: { data: null } };
         }
       } catch {
         retryIn = 5;
@@ -46,7 +51,7 @@ export function weather() {
         }, retryIn * 1000);
         return;
       }
-      if (retryIn && !this.weatherByKey[key]) this.weatherByKey = { ...this.weatherByKey, [key]: null };
+      if (retryIn) this.weatherByKey = { ...this.weatherByKey, [key]: { data: null } };
       inFlight.delete(key);
     },
 

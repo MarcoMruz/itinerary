@@ -33,7 +33,10 @@ export function itineraryApp(boot = {}) {
         if (this.editingChecklist) { event.preventDefault(); event.returnValue = ''; }
       });
       document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') this.refreshList();
+        if (document.visibilityState === 'visible') {
+          this.refreshList();
+          this.loadWeather(0);
+        }
       });
     },
     get day() { return this.current ? this.current.days[this.dayIndex] : null; },

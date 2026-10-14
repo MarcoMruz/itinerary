@@ -167,7 +167,7 @@ Weather: `GET /api/v1/itineraries/{id}/days/{day}/weather?date=YYYY-MM-DD` retur
 at the day's first stop, else the itinerary `startLocation`. The date comes from `?date=`, else the day's own `date`, else the itinerary `startDate` plus the day index.
 The UI shows a weather card for the selected day; visitors can pick the trip start date there (saved per itinerary in the browser) when the itinerary has none.
 Past days answer `status: "past"` and the UI hides the card for them; forecasts reach about 15 days ahead, a later date answers `status: "too_far"` with `availableFrom`.
-With weather off the endpoint answers `status: "disabled"`. Answers are cached in memory for an hour; uncached forecasts count towards `START_LOOKUPS_PER_MINUTE` and are capped at 6/min across all clients.
+With weather off the endpoint answers `status: "disabled"`. Server and browser answers are cached for an hour; the browser refreshes expired weather when revisiting a day or returning to the tab. Changing the day's place invalidates its browser entry. Concurrent requests for the same coordinates and date share one forecast lookup. Uncached geocodes and forecasts each count towards `START_LOOKUPS_PER_MINUTE`; forecasts refill at 6/min across all clients with a burst of 60.
 
 ```sh
 claude mcp add --transport http itinerary https://your-host/mcp --header "Authorization: Bearer $API_TOKEN"

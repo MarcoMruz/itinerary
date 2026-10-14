@@ -60,6 +60,12 @@ type cachedWeather struct {
 	fetched time.Time
 }
 
+type weatherCall struct {
+	done chan struct{}
+	w    DayWeather
+	err  error
+}
+
 type Weather struct {
 	geo       *Geo
 	client    *http.Client
@@ -68,8 +74,9 @@ type Weather struct {
 	now       func() time.Time
 	limit     *rateLimiter
 
-	mu    sync.Mutex
-	cache map[string]cachedWeather
+	mu       sync.Mutex
+	cache    map[string]cachedWeather
+	inFlight map[string]*weatherCall
 }
 
 func NewWeather(geo *Geo, userAgent string) *Weather {
@@ -81,6 +88,7 @@ func NewWeather(geo *Geo, userAgent string) *Weather {
 		now:       time.Now,
 		limit:     newRateLimiter(weatherFetchesPerMinute, weatherFetchBurst),
 		cache:     map[string]cachedWeather{},
+		inFlight:  map[string]*weatherCall{},
 	}
 }
 
@@ -112,6 +120,12 @@ func (wx *Weather) Day(ctx context.Context, place, date string, allow func() boo
 		res.AvailableFrom = day.AddDate(0, 0, -(forecastDays - 2)).Format(dateLayout)
 		return res, nil
 	}
+	wx.geo.mu.Lock()
+	_, known := wx.geo.cachedPlace(placeKey(place))
+	wx.geo.mu.Unlock()
+	if !known && !allow() {
+		return res, ErrWeatherLimited
+	}
 	p, ok := wx.geo.locate(ctx, place, true)
 	wx.geo.persist()
 	if !ok {
@@ -121,34 +135,54 @@ func (wx *Weather) Day(ctx context.Context, place, date string, allow func() boo
 		res.Status = weatherNotFound
 		return res, nil
 	}
+	res, err = wx.forecast(ctx, *p, date, allow)
 	res.Place = p.Name
+	return res, err
+}
 
+func (wx *Weather) forecast(ctx context.Context, p point, date string, allow func() bool) (DayWeather, error) {
 	key := fmt.Sprintf("%.4f,%.4f,%s", p.Lat, p.Lon, date)
 	wx.mu.Lock()
 	c, hit := wx.cache[key]
-	wx.mu.Unlock()
 	if hit && wx.now().Sub(c.fetched) < weatherTTL {
-		c.w.Place = p.Name
+		wx.mu.Unlock()
 		return c.w, nil
 	}
+	if call, ok := wx.inFlight[key]; ok {
+		wx.mu.Unlock()
+		select {
+		case <-call.done:
+			return call.w, call.err
+		case <-ctx.Done():
+			return DayWeather{}, ctx.Err()
+		}
+	}
+	call := &weatherCall{done: make(chan struct{})}
+	wx.inFlight[key] = call
+	wx.mu.Unlock()
+
+	call.w, call.err = wx.fetchAllowed(ctx, p, date, allow)
+	wx.mu.Lock()
+	if call.err == nil {
+		if len(wx.cache) >= maxWeatherCache {
+			wx.cache = map[string]cachedWeather{}
+		}
+		wx.cache[key] = cachedWeather{call.w, wx.now()}
+	}
+	delete(wx.inFlight, key)
+	close(call.done)
+	wx.mu.Unlock()
+	return call.w, call.err
+}
+
+func (wx *Weather) fetchAllowed(ctx context.Context, p point, date string, allow func() bool) (DayWeather, error) {
 	if !allow() {
-		return res, ErrWeatherLimited
+		return DayWeather{}, ErrWeatherLimited
 	}
 	if ok, _ := wx.limit.allow("*", wx.now()); !ok {
-		return res, ErrWeatherLimited
+		return DayWeather{}, ErrWeatherLimited
 	}
-	fetched, err := wx.fetch(ctx, *p, date)
-	if err != nil {
-		return res, err
-	}
-	fetched.Place = p.Name
-	wx.mu.Lock()
-	if len(wx.cache) >= maxWeatherCache {
-		wx.cache = map[string]cachedWeather{}
-	}
-	wx.cache[key] = cachedWeather{fetched, wx.now()}
-	wx.mu.Unlock()
-	return fetched, nil
+	return wx.fetch(ctx, p, date)
 }
 
 func (wx *Weather) fetch(ctx context.Context, p point, date string) (DayWeather, error) {

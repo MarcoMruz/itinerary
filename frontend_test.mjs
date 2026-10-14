@@ -7,7 +7,7 @@ import { chatMessage, exportUrl, previewStats } from './static/domain/import-exp
 import { hostname, insightPage, parseHash, viewHash } from './static/domain/insights.mjs';
 import { dayDate, describeWeather, fmtDate, fmtTemp, isPastDate, localDate } from './static/domain/weather.mjs';
 
-const globalNames = ['localStorage', 'fetch', 'navigator', 'window', 'location', 'history'];
+const globalNames = ['localStorage', 'fetch', 'navigator', 'window', 'location', 'history', 'document'];
 const originalGlobals = Object.fromEntries(globalNames.map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
 afterEach(() => globalNames.forEach(name => {
   if (originalGlobals[name]) Object.defineProperty(globalThis, name, originalGlobals[name]);
@@ -403,4 +403,58 @@ test('past days neither load nor show weather, and a finished browser trip start
   app.current = { ...app.current, days: [{ activities: [] }, { date: '2099-01-01', activities: [] }] };
   app.dayIndex = 1;
   assert.equal(app.showWeather, true);
+});
+
+test('weather invalidates when the first stop or fallback start location changes', async () => {
+  let calls = 0;
+  const app = setup(async () => ({ ok: true, json: async () => ({ status: 'ok', tempMax: ++calls }) }));
+  app.current = { ...app.current, days: [{ date: '2099-07-01', activities: [{ place: 'Bratislava' }] }] };
+  await app.loadWeather(0);
+  app.current = { ...app.current, days: [{ date: '2099-07-01', activities: [{ place: 'Tokyo' }] }] };
+  assert.equal(app.dayWeather, undefined);
+  await app.loadWeather(0);
+  assert.equal(app.dayWeather.tempMax, 2);
+  app.current = { ...app.current, startLocation: 'Hotel A', days: [{ date: '2099-07-01', activities: [] }] };
+  await app.loadWeather(0);
+  app.current = { ...app.current, startLocation: 'Hotel B' };
+  assert.equal(app.dayWeather, undefined);
+  await app.loadWeather(0);
+  assert.equal(app.dayWeather.tempMax, 4);
+});
+
+test('weather and too-far answers expire after an hour', async t => {
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  const app = setup(async () => ({ ok: true, json: async () => ({ status: 'too_far' }) }));
+  app.current = { ...app.current, days: [{ date: '2099-07-01', activities: [] }] };
+  await app.loadWeather(0);
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ status: 'ok', tempMax: 20 }) });
+  now += 3600000;
+  await app.loadWeather(0);
+  assert.equal(app.dayWeather.status, 'ok');
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ status: 'ok', tempMax: 25 }) });
+  now += 3599999;
+  await app.loadWeather(0);
+  assert.equal(app.dayWeather.tempMax, 20);
+  now += 1;
+  await app.loadWeather(0);
+  assert.equal(app.dayWeather.tempMax, 25);
+});
+
+test('returning to the tab refreshes weather without polling', () => {
+  const app = setup(async () => ({}));
+  let onVisibility, loads = 0;
+  globalThis.document = { visibilityState: 'hidden', addEventListener: (name, callback) => { onVisibility = callback; } };
+  globalThis.window.addEventListener = () => {};
+  app.$watch = () => {};
+  app.checkChecklistAccess = () => {};
+  app.refreshList = () => {};
+  app.loadWeather = () => { loads += 1; };
+  app.init();
+  assert.equal(loads, 1);
+  onVisibility();
+  assert.equal(loads, 1);
+  document.visibilityState = 'visible';
+  onVisibility();
+  assert.equal(loads, 2);
 });
